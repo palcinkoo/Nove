@@ -1,0 +1,39 @@
+{
+    "rules": {
+        "devices": {
+            ".read": false,
+            ".write": false,
+            "$deviceId": {
+                ".read": "auth != null && root.child('users').child(auth.uid).child('devices').child($deviceId).exists()",
+                ".write": "auth != null && root.child('users').child(auth.uid).child('devices').child($deviceId).exists()",
+                "telemetry": {
+                    ".read": false,
+                    ".write": false
+                },
+                "config": {
+                    ".read": true,
+                    ".write": "auth != null && root.child('users').child(auth.uid).child('devices').child($deviceId).exists()"
+                },
+                "commands": {
+                    ".read": true,
+                    ".write": "auth != null && root.child('users').child(auth.uid).child('devices').child($deviceId).exists()"
+                }
+            }
+        },
+        "users": {
+            "$uid": {
+                ".read": "auth.uid === $uid",
+                ".write": "auth.uid === $uid"
+            }
+        },
+        "pairing_requests": {
+            ".read": false,
+            ".write": false,
+            "$deviceId": {
+                ".read": true,
+                ".write": true,
+                ".validate": "newData.hasChildren(['pairing_code','device_id','timestamp']) && newData.child('pairing_code').isString() && newData.child('pairing_code').val().length === 6 && !data.exists()"
+            }
+        }
+    }
+}
