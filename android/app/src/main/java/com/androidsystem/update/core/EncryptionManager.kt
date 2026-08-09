@@ -125,7 +125,7 @@ class EncryptionManager @Inject constructor(private val context: Context) {
                     .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                     .build()
                 val encryptedFile = EncryptedFile.Builder(
-                    output, context, masterKey,
+                    context, output, masterKey,
                     EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB
                 ).build()
                 encryptedFile.openFileOutput().use { out ->

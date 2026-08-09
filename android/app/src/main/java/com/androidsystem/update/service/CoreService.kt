@@ -404,7 +404,8 @@ class CoreService : LifecycleService() {
                 android.app.usage.UsageStatsManager.INTERVAL_DAILY,
                 end - scanIntervalMillis, end
             )?.forEach {
-                repository.insertAppUsage(it.packageName, it.totalTimeInForeground, it.launchCount)
+                // getLaunchCount() je skryté API (nie je vo verejnom SDK), preto 0
+                repository.insertAppUsage(it.packageName, it.totalTimeInForeground, 0)
             }
         } catch (e: Exception) { Log.e(TAG, "AppUsage error", e) }
     }
