@@ -1,0 +1,44 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/build-apk.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check google-services.json
+        run: |
+          if [ ! -f android/app/google-services.json ]; then
+            echo "::error::Chyba: android/app/google-services.json chyba. Stiahni ho z Firebase konzoly (Project settings -> Your apps -> Add app -> Android, package name: com.androidsystem.update) a commitni ho do android/app/"
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.4"
+
+      - name: Build debug APK
+        run: |
+          cd android
+          gradle assembleDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-utility-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
