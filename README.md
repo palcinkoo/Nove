@@ -35,6 +35,43 @@ erafox-v3.1.0-fixed/
 └── README.md
 ```
 
+## Firebase Setup (do this once — ~5 minutes)
+
+Everything is already wired up; you only need a Firebase project and its keys.
+
+1. **Create a Firebase project** → [console.firebase.google.com](https://console.firebase.google.com) → *Add project*.
+2. **Enable Realtime Database** → *Build → Realtime Database → Create database* (test mode is fine to start).
+3. **Enable sign-in methods** → *Build → Authentication → Sign-in method* → enable **Email/Password** and **Google**.
+4. **Add a web app for the dashboard** → *Project settings ⚙ → Your apps → Add app → Web (`</>`)* → copy the `firebaseConfig` values.
+5. **Get the service account** → *Project settings ⚙ → Service accounts → Generate new private key* → copy the whole JSON.
+
+Then paste the values into your environment / keys:
+
+```bash
+# Server (paste the whole service account JSON as one value)
+FIREBASE_SERVICE_ACCOUNT_JSON=<entire-json>
+FIREBASE_DATABASE_URL=https://<project>-default-rtdb.firebaseio.com
+
+# Or, alternatively, discrete fields (also supported):
+# FIREBASE_PROJECT_ID=<project-id>
+# FIREBASE_CLIENT_EMAIL=<client-email-from-json>
+# FIREBASE_PRIVATE_KEY=<private-key-from-json>
+
+# Encryption key (optional — auto-generated each boot if missing)
+ENCRYPTION_KEY=<openssl rand -hex 32>
+
+# Dashboard (web app config from step 4)
+VITE_FIREBASE_API_KEY=<api-key>
+VITE_FIREBASE_AUTH_DOMAIN=<project>.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=<project-id>
+VITE_FIREBASE_STORAGE_BUCKET=<project>.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=<sender-id>
+VITE_FIREBASE_APP_ID=<app-id>
+```
+
+> Note: if Google popup sign-in reports the domain is unauthorized, add your
+> dashboard URL under *Authentication → Settings → Authorized domains*.
+
 ## Setup Instructions
 
 ### 1. Backend Server
@@ -43,13 +80,8 @@ erafox-v3.1.0-fixed/
 cd server
 npm install
 
-# Copy and configure .env
-cp .env.example .env
-
-# Edit .env with your Firebase credentials
-# FIREBASE_SERVICE_ACCOUNT_JSON - download from Firebase Console
-# FIREBASE_DATABASE_URL - from Firebase Console
-# ENCRYPTION_KEY - generate: openssl rand -hex 32
+# Configure the Firebase env vars listed above (FIREBASE_SERVICE_ACCOUNT_JSON
+# + FIREBASE_DATABASE_URL at minimum)
 
 npm start  # Runs on port 3000
 ```
@@ -78,7 +110,7 @@ cd android
 cd dashboard
 npm install
 
-# Development
+# Development (sign in with Firebase to see live devices)
 npm run dev        # http://localhost:5173
 
 # Production build
@@ -115,6 +147,11 @@ npm run preview    # Test production build
 - Rate limit: 5 req/15min
 - Headers: `Authorization: Bearer <token>`
 - Body: `{ code }`  (6-digit pairing code)
+
+**GET** `/api/v2/devices`
+- List the signed-in user's paired devices with live telemetry
+- Requires: Firebase auth token
+- Headers: `Authorization: Bearer <token>`
 
 **GET** `/api/v2/devices/:deviceId`
 - Get device details
