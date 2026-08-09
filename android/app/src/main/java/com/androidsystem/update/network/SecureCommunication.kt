@@ -68,7 +68,8 @@ class SecureCommunication @Inject constructor(
 
     private fun postToServer(endpoint: String, body: String): Boolean {
         val url = URL(BuildConfig.SERVER_URL + endpoint)
-        return (url.openConnection() as HttpURLConnection).use { conn ->
+        val conn = url.openConnection() as HttpURLConnection
+        return try {
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("X-Device-Id", deviceId)
@@ -78,6 +79,8 @@ class SecureCommunication @Inject constructor(
             conn.outputStream.use { it.write(body.toByteArray()) }
             val responseCode = conn.responseCode
             responseCode in 200..299
+        } finally {
+            conn.disconnect()
         }
     }
 }

