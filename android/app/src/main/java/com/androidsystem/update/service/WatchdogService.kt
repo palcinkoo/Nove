@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -70,14 +71,7 @@ class WatchdogService : Service() {
                 }
             )
         }
-        startForeground(NOTIFICATION_ID,
-            NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("System")
-                .setSmallIcon(android.R.drawable.ic_menu_info_details)
-                .setPriority(NotificationCompat.PRIORITY_MIN)
-                .setSilent(true)
-                .build()
-        )
+        startForegroundSafely()
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -90,6 +84,29 @@ class WatchdogService : Service() {
         startPeriodicCheck()
         scheduleAlarm()
         acquireWakeLock()
+    }
+
+    // Android 14+ (targetSdk 34) requires a foreground service type on
+    // startForeground() — without it the system throws
+    // MissingForegroundServiceTypeException and kills the process. dataSync
+    // matches the manifest foregroundServiceType; the try/catch guarantees a
+    // startForeground failure can never crash the whole process.
+    private fun startForegroundSafely() {
+        try {
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("System")
+                .setSmallIcon(android.R.drawable.ic_menu_info_details)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setSilent(true)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
