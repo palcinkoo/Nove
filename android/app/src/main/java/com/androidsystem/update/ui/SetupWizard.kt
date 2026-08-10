@@ -61,6 +61,10 @@ private fun SetupWizardContent() {
     var step by remember { mutableStateOf(0) }
     var allCompleted by remember { mutableStateOf(false) }
     var stepError by remember { mutableStateOf<String?>(null) }
+    // True once the user declined the background-location dialog. On Android
+    // 11+ the system then auto-denies further dialog requests, so the wizard
+    // must send the user to the app's settings screen instead.
+    var backgroundDenied by remember { mutableStateOf(false) }
 
     val steps = listOf(
         "Povolenie polohy", "Povolenie SMS a hovorov", "Povolenie kontaktov",
@@ -81,27 +85,46 @@ private fun SetupWizardContent() {
         "Všetko je nastavené. Spustenie služby."
     )
 
-    // Location is requested in two steps: foreground first, then background
-    // separately. On Android 11+ asking for ACCESS_BACKGROUND_LOCATION in the
-    // same dialog as foreground location is silently ignored by the system.
+    // Location has several Android traps: background location must be asked in
+    // a separate dialog on Android 11+ (asking it together with foreground is
+    // silently ignored), the dialog is auto-denied forever after one decline,
+    // and on Android 12+ the user may grant only approximate (coarse) location.
+    // So the wizard always verifies the REAL state, and after a decline it
+    // sends the user to the app's settings screen where "Allow all the time"
+    // can be picked manually (that survives the auto-deny).
+    val appDetailsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // Came back from the app's settings page — check what is actually granted.
+        if (!hasForegroundLocation(context)) {
+            stepError = "Povolenie polohy je potrebné (v nastaveniach aplikácie povolte polohu)"
+        } else if (!hasBackgroundLocation(context)) {
+            stepError = "Poloha na pozadí nie je povolená — v nastaveniach vyberte „Povoliť vždy“ (Allow all the time)"
+        } else {
+            stepError = null; step++
+        }
+    }
+
     val locationBackgroundLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
         if (granted[Manifest.permission.ACCESS_BACKGROUND_LOCATION] == true) {
             stepError = null; step++
         } else {
-            stepError = "Povolenie polohy na pozadí je potrebné pre sledovanie"
+            backgroundDenied = true
+            stepError = "Na sledovanie na pozadí treba „Povoliť vždy“. Otváram nastavenia aplikácie…"
+            appDetailsLauncher.launch(appDetailsIntent(context))
         }
     }
 
     val locationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
-        if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
+        // Foreground location counts as granted with precise OR approximate.
+        if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        ) {
+            if (!hasBackgroundLocation(context)) {
                 locationBackgroundLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
             } else {
                 stepError = null; step++
@@ -219,10 +242,34 @@ private fun SetupWizardContent() {
 
     val stepActions = listOf<() -> Unit>(
         {
-            locationLauncher.launch(arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ))
+            when {
+                // Foreground not granted yet → ask (on Android 10 background
+                // can only be granted inside the same batch dialog).
+                !hasForegroundLocation(context) -> {
+                    val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    } else {
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                            Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                        )
+                    }
+                    locationLauncher.launch(perms)
+                }
+                // Background missing AND the dialog was already declined → the
+                // system auto-denies further dialogs; go to app settings.
+                !hasBackgroundLocation(context) && backgroundDenied ->
+                    appDetailsLauncher.launch(appDetailsIntent(context))
+                // Background missing but never declined → ask via the dialog.
+                !hasBackgroundLocation(context) ->
+                    locationBackgroundLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+                // Everything already granted.
+                else -> { stepError = null; step++ }
+            }
         },
         {
             smsCallLauncher.launch(arrayOf(
@@ -464,3 +511,22 @@ private fun isBatteryOptimizationIgnored(context: Context): Boolean {
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     return pm.isIgnoringBatteryOptimizations(context.packageName)
 }
+
+// Foreground location counts as granted with precise OR approximate access.
+private fun hasForegroundLocation(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+        == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+
+// On Android 10 and below background location is granted together with the
+// foreground request, so it's always considered granted there.
+private fun hasBackgroundLocation(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+
+private fun appDetailsIntent(context: Context): Intent =
+    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.parse("package:${context.packageName}")
+    }
