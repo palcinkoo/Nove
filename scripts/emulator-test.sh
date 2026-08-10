@@ -53,8 +53,13 @@ for p in \
 done
 
 echo "=== Start CoreService (the wizard's final step) ==="
+# CoreService is exported=false, so the adb shell user cannot start it; a
+# root adbd (google_apis images support `adb root`) can.
+adb root >/dev/null 2>&1 || true
+sleep 3
+adb wait-for-device
 adb logcat -c 2>/dev/null || true
-adb shell am start-foreground-service -n "$PKG/.service.CoreService"
+adb shell am start-foreground-service --user 0 -n "$PKG/.service.CoreService"
 sleep 10
 
 echo "=== Crash buffer after service start ==="
