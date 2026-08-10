@@ -14,7 +14,7 @@ android {
         applicationId = "com.androidsystem.update"
         minSdk = 24
         targetSdk = 34
-        versionCode = 411
+        versionCode = 412
         versionName = "4.1.1"
         buildConfigField("String", "SERVER_URL", "\"https://nove-server-3ism.onrender.com/api/v2\"")
     }
