@@ -130,7 +130,9 @@ npm run preview    # Test production build
 - Device heartbeat/status
 - Rate limit: 50 req/5min
 - Headers: `x-device-id`
-- Body: `{ device_id, timestamp, status, battery, interval }`
+- Body: `{ device_id, timestamp, status, battery, interval, pairing_code?, pairing_request? }`
+- Response: `{ success, commands, paired }` — `paired` is `true` when the device is already bound to a user account
+- **Pairing handshake:** an unpaired app includes `pairing_code` (6 digits) and `pairing_request: true` in every heartbeat. The server stores the code under `pairing_requests/<deviceId>` (5-minute TTL, refreshed on each heartbeat) so `POST /api/v2/pair` can resolve it. Once paired, the app stops advertising the code and the server replies `paired: true`.
 
 **POST** `/api/v2/data`
 - Send encrypted batch data
@@ -170,6 +172,12 @@ npm run preview    # Test production build
 - Telemetry: 50 requests per 5 minutes
 - Pairing: 5 requests per 15 minutes
 - IP-based fallback
+
+✅ **Pairing Flow**
+1. The app shows a stable 6-digit code on its setup completion screen and advertises it in every heartbeat (`pairing_request: true`).
+2. The dashboard user enters the code (dashboard "Pair a device" card → `POST /api/v2/pair`).
+3. The server binds the device to the user's Firebase account (`users/<uid>/devices` + `devices/<id>/pairedTo`) and removes the pairing request.
+4. The app's next heartbeat gets `paired: true` and stops advertising the code; the device appears in `GET /api/v2/devices` with live telemetry.
 
 ✅ **Validation**
 - Device ID sanitization (alphanumeric + dash/underscore)

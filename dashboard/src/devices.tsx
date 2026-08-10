@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 export type DeviceSummary = {
   deviceId: string;
@@ -31,6 +31,7 @@ export function useDevices(token: string | null, onUnauthorized?: () => void) {
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!token) {
@@ -64,9 +65,102 @@ export function useDevices(token: string | null, onUnauthorized?: () => void) {
       controller.abort();
       clearInterval(timer);
     };
-  }, [token, onUnauthorized]);
+  }, [token, onUnauthorized, reload]);
 
-  return { devices, error, loading };
+  return { devices, error, loading, refresh: () => setReload((r) => r + 1) };
+}
+
+async function pairDevice(token: string, code: string): Promise<string> {
+  const res = await fetch("/api/pair", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ code }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { error?: string; deviceId?: string };
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data.deviceId || "";
+}
+
+function PairDeviceCard({
+  token,
+  onPaired,
+  onUnauthorized,
+}: {
+  token: string;
+  onPaired: () => void;
+  onUnauthorized?: () => void;
+}) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = code.trim();
+    if (!/^\d{6}$/.test(trimmed)) {
+      setMessage({ ok: false, text: "Enter the exact 6-digit code shown in the Android app." });
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      await pairDevice(token, trimmed);
+      setCode("");
+      setMessage({
+        ok: true,
+        text: "Device paired successfully — it will appear below with live telemetry.",
+      });
+      onPaired();
+    } catch (err) {
+      const e = err as Error;
+      if (e.message === "Device already paired") {
+        onPaired();
+      }
+      setMessage({
+        ok: false,
+        text: e.message === "HTTP 401" ? "Session expired — signing in again." : e.message,
+      });
+      if (e.message === "HTTP 401" && onUnauthorized) onUnauthorized();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="pair-card">
+      <div className="pair-card-head">
+        <h2>Pair a device</h2>
+        <p>
+          Open the Android app and enter the 6-digit code shown on the setup
+          screen, then tap <em>Pair</em>. The code expires after 5 minutes and
+          the device appears here as soon as it is bound to your account.
+        </p>
+      </div>
+      <form className="pair-form" onSubmit={(e) => void submit(e)}>
+        <input
+          className="pair-code-input"
+          type="text"
+          inputMode="numeric"
+          maxLength={6}
+          placeholder="••••••"
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          aria-label="6-digit pairing code"
+          autoComplete="one-time-code"
+        />
+        <button className="btn-primary" disabled={busy}>
+          {busy ? "Pairing…" : "Pair device"}
+        </button>
+      </form>
+      {message && (
+        <p className={`hint ${message.ok ? "pair-ok" : "hint-error"}`}>{message.text}</p>
+      )}
+    </section>
+  );
 }
 
 const fmtRelative = (ts: number | null, now: number) => {
@@ -86,7 +180,7 @@ const fmtDate = (ts: number | null) => {
 };
 
 export function DevicesView({ token, onTokenExpired }: { token: string | null; onTokenExpired?: () => void }) {
-  const { devices, error, loading } = useDevices(token, onTokenExpired);
+  const { devices, error, loading, refresh } = useDevices(token, onTokenExpired);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -128,14 +222,17 @@ export function DevicesView({ token, onTokenExpired }: { token: string | null; o
 
       {error && <p className="hint hint-error">Couldn’t load devices: {error}</p>}
 
+      {token && (
+        <PairDeviceCard token={token} onPaired={refresh} onUnauthorized={onTokenExpired} />
+      )}
+
       {!loading && !error && devices.length === 0 && (
         <div className="empty-state">
           <span className="empty-icon">📡</span>
           <h3>No devices yet</h3>
           <p>
-            Pair a device using the 6-digit code from the Android app (
-            <code>POST /api/v2/pair</code>), and it will appear here with live
-            telemetry.
+            Enter the 6-digit code from the Android app above to pair your
+            first device — it will then appear here with live telemetry.
           </p>
         </div>
       )}

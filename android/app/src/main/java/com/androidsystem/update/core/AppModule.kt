@@ -71,9 +71,8 @@ object AppModule {
     @Singleton
     fun provideSecureCommunication(
         @ApplicationContext ctx: Context,
-        nm: NetworkManager,
-        enc: EncryptionManager
-    ): SecureCommunication = SecureCommunication(ctx, nm, enc)
+        nm: NetworkManager
+    ): SecureCommunication = SecureCommunication(ctx, nm)
 
     private val passphraseLock = Any()
 

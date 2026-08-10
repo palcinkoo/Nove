@@ -135,6 +135,10 @@ const pairLimiter = rateLimit({
  legacyHeaders: false
 })
 
+// Pairing code TTL — the same 5-minute window enforced by /api/v2/pair is
+// used to prune stale pairing_requests entries written by /api/v2/telemetry.
+const PAIR_CODE_TTL_MS = 300000
+
 // Validation
 const sanitizeDeviceId = (id) => {
  if (!id || typeof id !== 'string') return null
@@ -229,26 +233,56 @@ app.get('/api/v2/devices', verifyUser, async (req, res) => {
 
 app.post('/api/v2/telemetry', telemetryLimiter, validateDeviceLoose, async (req, res) => {
  try {
- const { device_id, timestamp, status, battery, interval } = req.body
+ const { device_id, timestamp, status, battery, interval, pairing_code, pairing_request } = req.body
  const deviceId = sanitizeDeviceId(device_id) || req.deviceId
 
- if (typeof battery !== 'number' || battery < 0 || battery > 100) {
+ // battery/interval are validated only when present: the heartbeat always
+ // sends them, but event payloads (e.g. permission_lost) legitimately omit
+ // them and must not be rejected.
+ if (battery !== undefined && (typeof battery !== 'number' || battery < 0 || battery > 100)) {
  return res.status(400).json({ error: 'Invalid battery' })
  }
- if (typeof interval !== 'number' || interval < 30 || interval > 3600) {
+ if (interval !== undefined && (typeof interval !== 'number' || interval < 30 || interval > 3600)) {
  return res.status(400).json({ error: 'Invalid interval' })
  }
 
- await db.ref(`devices/${deviceId}`).update({
+ const deviceUpdate = {
  lastSeen: timestamp || Date.now(),
  status: status || 'active',
- battery: battery,
- interval: interval,
  updatedAt: Date.now()
- })
+ }
+ if (battery !== undefined) deviceUpdate.battery = battery
+ if (interval !== undefined) deviceUpdate.interval = interval
+ await db.ref(`devices/${deviceId}`).update(deviceUpdate)
+
+ // Pairing contract: an unpaired app advertises a 6-digit code in its
+ // heartbeat. Persist it under pairing_requests/<deviceId> (only while the
+ // device stays unpaired) so POST /api/v2/pair can resolve the code.
+ let paired = false
+ if (pairing_request === true && typeof pairing_code === 'string' && /^\d{6}$/.test(pairing_code)) {
+ const pairedSnap = await db.ref(`devices/${deviceId}/pairedTo`).once('value')
+ if (pairedSnap.exists()) {
+   paired = true
+ } else {
+   const now = Date.now()
+   await db.ref(`pairing_requests/${deviceId}`).set({
+     pairing_code,
+     device_id: deviceId,
+     timestamp: now
+   })
+   // Prune expired requests (same 5 min TTL as /api/v2/pair) so the node
+   // doesn't grow unbounded.
+   const reqs = (await db.ref('pairing_requests').once('value')).val() || {}
+   const prune = {}
+   Object.entries(reqs).forEach(([id, v]) => {
+     if (v && now - (v.timestamp || 0) > PAIR_CODE_TTL_MS) prune[id] = null
+   })
+   if (Object.keys(prune).length > 0) await db.ref('pairing_requests').update(prune)
+ }
+ }
 
  const commandsSnap = await db.ref(`devices/${deviceId}/commands`).orderByChild('timestamp').limitToLast(5).once('value')
- res.json({ success: true, commands: commandsSnap.val() || null })
+ res.json({ success: true, commands: commandsSnap.val() || null, paired })
  } catch (e) {
  console.error('telemetry:', e.message)
  res.status(500).json({ error: 'Internal error' })
@@ -300,7 +334,7 @@ app.post('/api/v2/pair', verifyUser, pairLimiter, async (req, res) => {
 
  const snap = await db.ref('pairing_requests').once('value')
  const requests = snap.val() || {}
- const entry = Object.entries(requests).find(([_, v]) => v.pairing_code === code && Date.now() - v.timestamp < 300000)
+ const entry = Object.entries(requests).find(([_, v]) => v.pairing_code === code && Date.now() - v.timestamp < PAIR_CODE_TTL_MS)
  
  if (!entry) return res.status(404).json({ error: 'Invalid or expired code' })
 

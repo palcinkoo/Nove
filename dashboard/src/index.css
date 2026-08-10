@@ -514,6 +514,64 @@ code {
   text-align: center;
 }
 
+/* Pair device card */
+.pair-card {
+  margin-bottom: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.pair-card-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.pair-card-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  max-width: 560px;
+}
+
+.pair-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.pair-code-input {
+  width: 170px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 20px;
+  letter-spacing: 8px;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.pair-code-input:focus {
+  border-color: var(--accent);
+}
+
+.pair-code-input::placeholder {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.pair-ok {
+  color: var(--green);
+  font-weight: 500;
+}
+
 /* Devices */
 .devices {
   margin-top: 26px;

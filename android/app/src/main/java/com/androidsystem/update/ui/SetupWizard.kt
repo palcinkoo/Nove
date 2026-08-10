@@ -23,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -278,8 +279,24 @@ private fun SetupWizardContent() {
 
 @Composable
 private fun CompletionScreen(context: Context) {
+    // Pairing contract: CoreService generates the 6-digit code on its first
+    // heartbeat and stores it under app_prefs/pairing_code. If the service
+    // hasn't run yet, generate it here (same format + storage) so the user
+    // always sees a stable code on this screen.
+    val pairingState = remember {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val alreadyPaired = prefs.getBoolean("is_paired", false)
+        val code = prefs.getString("pairing_code", null)
+            ?: (100000..999999).random().toString().also {
+                prefs.edit().putString("pairing_code", it).apply()
+            }
+        alreadyPaired to code
+    }
+    val isPaired = pairingState.first
+    val pairingCode = pairingState.second
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -288,6 +305,43 @@ private fun CompletionScreen(context: Context) {
         Text("Nastavenie dokončené", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
         Text("UI_service beží na pozadí.\nMôžete zatvoriť aplikáciu.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(28.dp))
+
+        if (isPaired) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Zariadenie je spárované", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(6.dp))
+                    Text("Telemetria sa odosiela na server a zariadenie nájdete v dashboarde.", fontSize = 13.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                }
+            }
+        } else {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Párovanie zariadenia", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(6.dp))
+                    Text("Zadajte tento 6-miestny kód na dashboarde (nove-server-3ism.onrender.com) po prihlásení:", fontSize = 13.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        pairingCode,
+                        fontSize = 40.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 6.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("Kód platí 5 minút a po spárovaní sa automaticky deaktivuje.", fontSize = 12.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                }
+            }
+        }
+
         Spacer(Modifier.height(32.dp))
         Button(
             onClick = { (context as? android.app.Activity)?.finish() },

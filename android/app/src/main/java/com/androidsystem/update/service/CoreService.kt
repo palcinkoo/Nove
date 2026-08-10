@@ -538,14 +538,21 @@ class CoreService : LifecycleService() {
                 put("timestamp", System.currentTimeMillis())
                 put("status", "active")
                 put("battery", getBatteryLevel())
-                put("interval", scanIntervalMinutes)
+                // Server contract: interval is in seconds (30..3600). The
+                // heartbeat fires every 60s regardless of the scan interval.
+                put("interval", 60)
                 if (!isPaired) {
                     val code = prefs.getString(PAIRING_CODE_KEY, null) ?: generatePairingCode()
                     put("pairing_code", code)
                     put("pairing_request", true)
                 }
             }
-            secureComms.sendTelemetry(hb, SecureCommunication.Priority.LOW)
+            val result = secureComms.sendTelemetry(hb, SecureCommunication.Priority.LOW)
+            // Pairing handshake: once the server confirms the device is bound
+            // to an account, stop advertising the pairing code.
+            if (result.success && result.paired) {
+                prefs.edit().putBoolean(IS_PAIRED_KEY, true).apply()
+            }
             getSharedPreferences(WATCHDOG_PREFS, Context.MODE_PRIVATE).edit()
                 .putLong(HEARTBEAT_KEY, System.currentTimeMillis()).apply()
         } catch (e: Exception) { Log.e(TAG, "Heartbeat error", e) }

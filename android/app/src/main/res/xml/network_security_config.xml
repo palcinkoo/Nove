@@ -10,6 +10,6 @@
         <domain includeSubdomains="true">localhost</domain>
     </domain-config>
     <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">your-server.com</domain>
+        <domain includeSubdomains="true">nove-server-3ism.onrender.com</domain>
     </domain-config>
 </network-security-config>

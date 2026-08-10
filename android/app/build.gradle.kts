@@ -16,7 +16,7 @@ android {
         targetSdk = 34
         versionCode = 411
         versionName = "4.1.1"
-        buildConfigField("String", "SERVER_URL", "\"https://your-server.com/api/v2\"")
+        buildConfigField("String", "SERVER_URL", "\"https://nove-server-3ism.onrender.com/api/v2\"")
     }
 
     buildTypes {
