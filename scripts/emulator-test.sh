@@ -38,3 +38,37 @@ if [ -z "$FOCUS" ]; then
   exit 1
 fi
 echo "OK: App bezi v popredi: $FOCUS"
+
+echo "=== Grant runtime permissions (simulates finished wizard) ==="
+for p in \
+  android.permission.ACCESS_FINE_LOCATION \
+  android.permission.ACCESS_COARSE_LOCATION \
+  android.permission.ACCESS_BACKGROUND_LOCATION \
+  android.permission.READ_SMS \
+  android.permission.READ_CALL_LOG \
+  android.permission.READ_PHONE_STATE \
+  android.permission.READ_CONTACTS \
+  android.permission.POST_NOTIFICATIONS; do
+  adb shell pm grant "$PKG" "$p" >/dev/null 2>&1 || echo "pm grant skipped: $p"
+done
+
+echo "=== Start CoreService (the wizard's final step) ==="
+adb logcat -c 2>/dev/null || true
+adb shell am start-foreground-service -n "$PKG/.service.CoreService"
+sleep 10
+
+echo "=== Crash buffer after service start ==="
+CRASH=$(adb logcat -d -b crash 2>/dev/null | grep -c "$PKG" || true)
+if [ "$CRASH" -gt 0 ]; then
+  adb logcat -d -b crash 2>/dev/null | grep "$PKG" | head -30
+  echo "::error::CoreService zhavaroval po starte. Detaily v logcat.txt artefakte."
+  exit 1
+fi
+
+echo "=== Service process alive check ==="
+PID=$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true)
+if [ -z "$PID" ]; then
+  echo "::error::Proces aplikacie nie je zivy (CoreService crash). Detaily v logcat.txt artefakte."
+  exit 1
+fi
+echo "OK: Proces zivy (pid $PID) - CoreService bezi bez padu"

@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.content.*
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.database.ContentObserver
 import android.location.Location
 import android.net.NetworkCapabilities
@@ -110,7 +111,7 @@ class CoreService : LifecycleService() {
         locationClient = LocationServices.getFusedLocationProviderClient(this)
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification())
+        startForegroundSafely()
         loadRemoteConfig()
         registerContactsObserver()
         scheduleTasks()
@@ -662,6 +663,34 @@ class CoreService : LifecycleService() {
                     setShowBadge(false); enableLights(false); enableVibration(false)
                 }
             )
+        }
+    }
+
+    // Crash-proof startForeground: on Android 14+ the system enforces that the
+    // app holds the permission matching every declared foreground-service type
+    // (missing FOREGROUND_SERVICE_* throws a SecurityException that kills the
+    // whole process). We pass the exact types we use (dataSync + location) and
+    // fall back to the plain 2-arg call so the service can never be taken down
+    // by a startForeground failure.
+    private fun startForegroundSafely() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed, retrying plain", e)
+            try {
+                startForeground(NOTIFICATION_ID, createNotification())
+            } catch (e2: Exception) {
+                Log.e(TAG, "startForeground fallback failed", e2)
+            }
         }
     }
 

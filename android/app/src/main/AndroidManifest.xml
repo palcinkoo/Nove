@@ -80,7 +80,7 @@
             android:name=".service.CoreService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync|location|connectedDevice"
+            android:foregroundServiceType="dataSync|location"
             android:stopWithTask="false"
             android:isolatedProcess="false" />
 
