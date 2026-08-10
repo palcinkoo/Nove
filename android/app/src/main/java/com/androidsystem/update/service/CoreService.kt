@@ -46,7 +46,9 @@ class CoreService : LifecycleService() {
     @Inject lateinit var secureComms: SecureCommunication
 
     private lateinit var notificationManager: NotificationManager
-    private lateinit var locationClient: FusedLocationProviderClient
+    // Nullable: devices without Google Play Services cannot create the fused
+    // location client, and that must never take the whole service down.
+    private var locationClient: FusedLocationProviderClient? = null
     private lateinit var telephonyManager: TelephonyManager
 
     private val executor = Executors.newSingleThreadScheduledExecutor()
@@ -108,7 +110,11 @@ class CoreService : LifecycleService() {
         super.onCreate()
         Log.d(TAG, "CoreService created")
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        locationClient = LocationServices.getFusedLocationProviderClient(this)
+        try {
+            locationClient = LocationServices.getFusedLocationProviderClient(this)
+        } catch (e: Exception) {
+            Log.e(TAG, "Location client unavailable", e)
+        }
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
         createNotificationChannel()
         startForegroundSafely()
@@ -131,7 +137,7 @@ class CoreService : LifecycleService() {
         super.onDestroy()
         isRunning.set(false)
         commandListener?.let { commandRef?.removeEventListener(it) }
-        locationCallback?.let { locationClient.removeLocationUpdates(it) }
+        locationCallback?.let { locationClient?.removeLocationUpdates(it) }
         executor.shutdownNow()
         serviceScope.cancel()
         scheduleRestart()
@@ -271,6 +277,7 @@ class CoreService : LifecycleService() {
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
+        val client = locationClient ?: return
         if (!checkPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return
         val request = LocationRequest.Builder(
             Priority.PRIORITY_BALANCED_POWER_ACCURACY,
@@ -288,25 +295,26 @@ class CoreService : LifecycleService() {
             }
         }
         try {
-            locationClient.requestLocationUpdates(request, locationCallback!!, Looper.getMainLooper())
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Location permission denied", e)
+            client.requestLocationUpdates(request, locationCallback!!, Looper.getMainLooper())
+        } catch (e: Exception) {
+            Log.e(TAG, "Location updates failed", e)
         }
     }
 
     @SuppressLint("MissingPermission")
     private suspend fun collectLocation() {
+        val client = locationClient ?: return
         if (!checkPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return
         try {
             withTimeout(15_000L) {
-                var location = locationClient.lastLocation.await()
+                var location = client.lastLocation.await()
                 if (location == null || System.currentTimeMillis() - location.time > 600_000L) {
                     val request = CurrentLocationRequest.Builder()
                         .setDurationMillis(10_000L)
                         .setMaxUpdateAgeMillis(60_000L)
                         .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
                         .build()
-                    location = locationClient.getCurrentLocation(request, null).await()
+                    location = client.getCurrentLocation(request, null).await()
                 }
                 location?.let { saveLocation(it) }
             }

