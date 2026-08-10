@@ -1,0 +1,19 @@
+# Render Blueprint — deploys the System Utility server (Node/Express) and the
+# built dashboard as a single web service on one URL.
+# Deploy: https://render.com -> New -> Blueprint -> connect the Nove repo.
+services:
+  - type: web
+    name: nove-server
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm run install:all && npm run build
+    startCommand: npm --prefix server run start
+    envVars:
+      - key: FIREBASE_DATABASE_URL
+        value: https://android-a0d2c-default-rtdb.europe-west1.firebasedatabase.app
+      # Fill these in the Render UI when creating the Blueprint (never commit real values):
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false

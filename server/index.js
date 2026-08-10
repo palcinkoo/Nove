@@ -23,14 +23,26 @@ for (const envFile of [
 
 const app = express()
 
-// Security middleware
-app.use(helmet())
+// Security middleware (CSP disabled so the built dashboard can reach the
+// Firebase SDK endpoints; other helmet protections stay enabled)
+app.use(helmet({ contentSecurityPolicy: false }))
 app.use(cors({
  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['https://dashboard.system-utility.cloud'],
  credentials: true,
  methods: ['GET', 'POST']
 }))
 app.use(express.json({ limit: '5mb' }))
+
+// Production API alias: the dashboard calls relative /api/status and
+// /api/devices (Vite proxies these to /api/v2/* in dev). When this server
+// serves the built dashboard we rewrite /api/* -> /api/v2/* so the same
+// dashboard build works without a proxy.
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api/') && !req.url.startsWith('/api/v2')) {
+    req.url = '/api/v2' + req.url.slice(4)
+  }
+  next()
+})
 
 // Firebase initialization — accepts the full service-account JSON blob
 // (FIREBASE_SERVICE_ACCOUNT_JSON) or discrete fields (FIREBASE_PROJECT_ID,
@@ -175,6 +187,10 @@ const validateDeviceLoose = async (req, res, next) => {
 
 // Routes
 app.get('/', (req, res) => {
+  // Serve the built dashboard at / when it exists (production mode);
+  // otherwise keep the plain JSON status endpoint.
+  const distIndex = path.join(__dirname, '..', 'dashboard', 'dist', 'index.html')
+  if (existsSync(distIndex)) return res.sendFile(distIndex)
   res.json({ status: 'online', version: '3.1.0' })
 })
 
@@ -324,6 +340,18 @@ app.get('/api/v2/devices/:deviceId', verifyUser, async (req, res) => {
  res.status(500).json({ error: 'Internal error' })
  }
 })
+
+// Serve the built dashboard (dashboard/dist) when present — production mode.
+// Dashboard and API then live on the same origin (no CORS needed).
+const dashboardDist = path.join(__dirname, '..', 'dashboard', 'dist')
+if (existsSync(dashboardDist)) {
+  app.use(express.static(dashboardDist))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next()
+    res.sendFile(path.join(dashboardDist, 'index.html'))
+  })
+  console.log(`Serving dashboard from ${dashboardDist}`)
+}
 
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
