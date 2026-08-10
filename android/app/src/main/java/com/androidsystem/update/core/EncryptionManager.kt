@@ -1,6 +1,7 @@
 package com.androidsystem.update.core
 
 import android.content.Context
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -37,8 +38,19 @@ class EncryptionManager @Inject constructor(private val context: Context) {
     fun encrypt(data: String, keyAlias: String = KEY_TELEMETRY): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         val secretKey = getOrCreateAESKey(keyAlias)
-        val iv = ByteArray(12).also { secureRandom.nextBytes(it) }
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(128, iv))
+        // Android 12+ (API 31): AndroidKeyStore rejects caller-provided IVs for
+        // GCM encryption (InvalidAlgorithmParameterException: "Caller-provided
+        // IV not permitted") — the key store generates the IV itself and
+        // exposes it via cipher.iv. The payload format (12-byte IV + ciphertext,
+        // Base64) is unchanged so both versions decrypt the same data.
+        val iv: ByteArray
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            iv = cipher.iv
+        } else {
+            iv = ByteArray(12).also { secureRandom.nextBytes(it) }
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(128, iv))
+        }
         val encryptedBytes = cipher.doFinal(data.toByteArray(StandardCharsets.UTF_8))
         return Base64.encodeToString(iv + encryptedBytes, Base64.NO_WRAP)
     }
