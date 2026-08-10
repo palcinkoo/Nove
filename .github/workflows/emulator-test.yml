@@ -3,7 +3,7 @@ name: Android Emulator Test
 on:
   push:
     branches: [main]
-    paths: ["android/**", ".github/workflows/**"]
+    paths: ["android/**", "scripts/**", ".github/workflows/**"]
   workflow_dispatch:
 
 jobs:
@@ -43,42 +43,14 @@ jobs:
           target: google_apis
           profile: pixel_5
           disable-animations: true
-          script: |
-            set -e
-            # Install the APK
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-
-            # Launch the setup wizard (main activity)
-            adb shell am start -W -n com.androidsystem.update/.ui.SetupWizard
-
-            # Give the app time to render
-            sleep 12
-            adb exec-out screencap -p > /tmp/screen_1.png
-
-            sleep 6
-            adb exec-out screencap -p > /tmp/screen_2.png
-
-            # Which activity is in the foreground?
-            echo "--- Foreground activity ---"
-            adb shell dumpsys activity activities 2>/dev/null | grep -E 'ResumedActivity|mResumedActivity' | head -5
-            adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -5
-
-            # Crash log if any
-            echo "--- Crash log (if any) ---"
-            adb logcat -d -b crash 2>/dev/null | tail -40 || true
-
-            # Fail the build if the app is NOT in the foreground
-            FOCUS=$(adb shell dumpsys window 2>/dev/null | grep -oE 'com\.androidsystem\.update[^ /}]*' | head -1)
-            if [ -z "$FOCUS" ]; then
-              echo "::error::Aplikacia sa nespustila - nie je v popredi. Logcat:"
-              adb logcat -d 2>/dev/null | grep -iE 'FATAL|AndroidRuntime|com\.androidsystem' | tail -40 || true
-              exit 1
-            fi
-            echo "OK: App bezi v popredi: $FOCUS"
+          script: bash scripts/emulator-test.sh
 
       - name: Upload screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: emulator-screenshots
-          path: /tmp/screen_*.png
+          path: |
+            /tmp/screen_*.png
+            /tmp/logcat.txt
           if-no-files-found: error
