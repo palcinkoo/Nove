@@ -1,59 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useAuth, useSignIn, signOut } from "./auth";
-import { DevicesView } from "./devices";
+import { useAuth, useSignIn } from "./auth";
 import { firebaseConfigured } from "./firebase";
+import { Console } from "./console";
+import { fmtUptime } from "./format";
 
 type BackendStatus = {
   status: string;
   version: string;
   uptime?: number;
-};
-
-type Feature = {
-  icon: string;
-  title: string;
-  text: string;
-};
-
-const FEATURES: Feature[] = [
-  {
-    icon: "🔐",
-    title: "AES-256-GCM Encryption",
-    text: "All sensitive batch data is encrypted at rest with a rotating IV and auth tag.",
-  },
-  {
-    icon: "🛡️",
-    title: "Rate Limited API",
-    text: "Telemetry capped at 50 req / 5 min, pairing at 5 req / 15 min, with IP fallback.",
-  },
-  {
-    icon: "📡",
-    title: "Device Telemetry",
-    text: "Heartbeats report status, battery and interval — every 30s to 60min.",
-  },
-  {
-    icon: "🔑",
-    title: "Secure Pairing",
-    text: "6-digit codes with 5-minute expiry, bound to Firebase-verified accounts.",
-  },
-];
-
-const ENDPOINTS: Array<[string, string, string]> = [
-  ["POST", "/api/v2/telemetry", "Device heartbeat / status update"],
-  ["POST", "/api/v2/data", "Send encrypted batch data"],
-  ["POST", "/api/v2/pair", "Pair a device with a user account (auth)"],
-  ["GET", "/api/v2/devices", "List your devices with live telemetry (auth)"],
-  ["GET", "/api/v2/devices/:deviceId", "Read device details (auth)"],
-];
-
-const fmtUptime = (s?: number) => {
-  if (!s || s < 0) return "—";
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
 };
 
 function GoogleIcon() {
@@ -93,24 +47,22 @@ function SignInPanel() {
   return (
     <section className="auth-card">
       <div className="auth-card-head">
-        <h2>{mode === "in" ? "Sign in to view your devices" : "Create your account"}</h2>
+        <h2>{mode === "in" ? "Sign in to your console" : "Create your account"}</h2>
         <p className="muted">
           {mode === "in"
-            ? "Sign in with Google or email to see live telemetry for your paired devices."
+            ? "Sign in with Google or email to monitor your paired devices."
             : "A new Firebase account is created instantly — then sign in to pair devices."}
         </p>
       </div>
 
-      <button
-        className="btn-google"
-        disabled={busy}
-        onClick={() => void google()}
-      >
+      <button className="btn-google" disabled={busy} onClick={() => void google()}>
         <GoogleIcon />
         {busy ? "Signing in…" : "Continue with Google"}
       </button>
 
-      <div className="divider"><span>or use email</span></div>
+      <div className="divider">
+        <span>or use email</span>
+      </div>
 
       <form className="auth-form" onSubmit={submit}>
         <input
@@ -150,15 +102,42 @@ function SignInPanel() {
 
 function ConfigNotice() {
   return (
-    <section className="auth-card">
-      <div className="auth-card-head">
-        <h2>Firebase not configured yet</h2>
-        <p className="muted">
-          Add the Firebase web app config as <code>VITE_FIREBASE_*</code> env vars
-          (API key, auth domain, project id) so the dashboard can sign you in.
-        </p>
+    <div className="auth-page">
+      <section className="auth-card">
+        <div className="auth-card-head">
+          <h2>Firebase not configured yet</h2>
+          <p className="muted">
+            Add the Firebase web app config as <code>VITE_FIREBASE_*</code> env vars (API key, auth
+            domain, project id) so the dashboard can sign you in.
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AuthScreen({ status }: { status: BackendStatus | null }) {
+  const online = !!status;
+  return (
+    <div className="auth-page">
+      <div className="auth-brand">
+        <span className="brand-mark">SU</span>
+        <div className="brand-text">
+          <h1>System Utility</h1>
+          <p>Secure device monitoring console</p>
+        </div>
       </div>
-    </section>
+      <SignInPanel />
+      <div className="auth-status">
+        <div className={`pill ${online ? "pill-online" : "pill-offline"}`}>
+          <span className="pill-dot" />
+          {online ? `Backend online · v${status?.version ?? "?"}` : "Backend offline"}
+        </div>
+        {online && status?.uptime !== undefined && (
+          <span className="muted">uptime {fmtUptime(status.uptime)}</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -198,146 +177,25 @@ export default function App() {
   const online = reachable === true;
   const unknown = reachable === null;
   const signedIn = !!user;
-  const signedInEmail = user?.email ?? user?.displayName ?? "";
+
+  if (!firebaseConfigured) return <ConfigNotice />;
+
+  if (loading) {
+    return (
+      <div className="auth-page">
+        <p className="muted loading-text">Checking session…</p>
+      </div>
+    );
+  }
+
+  if (!signedIn) return <AuthScreen status={online ? status : null} />;
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">SU</span>
-          <div className="brand-text">
-            <h1>System Utility</h1>
-            <p>Secure data synchronization platform</p>
-          </div>
-        </div>
-        <div className="topbar-right">
-          {signedIn && (
-            <div className="user-chip">
-              <span className="user-avatar">
-                {user?.photoURL ? (
-                  <img src={user.photoURL} alt="" referrerPolicy="no-referrer" />
-                ) : (
-                  (signedInEmail[0] ?? "U").toUpperCase()
-                )}
-              </span>
-              <span className="user-email">{signedInEmail}</span>
-              <button
-                className="btn-ghost"
-                onClick={() => void signOut()}
-                disabled={!user}
-              >
-                Sign out
-              </button>
-            </div>
-          )}
-          <div className={`pill ${online ? "pill-online" : unknown ? "pill-checking" : "pill-offline"}`}>
-            <span className="pill-dot" />
-            {unknown
-              ? "Checking backend…"
-              : online
-                ? `Backend online · v${status?.version ?? "?"}`
-                : "Backend offline"}
-          </div>
-        </div>
-      </header>
-
-      <main>
-        {!firebaseConfigured && <ConfigNotice />}
-
-        {!loading && !firebaseConfigured && (
-          <section className="status-card">
-            <div className="status-card-head">
-              <h2>Backend status</h2>
-              <span className="muted">updates every 10s</span>
-            </div>
-            <div className="status-grid">
-              <div className="stat">
-                <span className="stat-label">Status</span>
-                <span className={`stat-value ${online ? "ok" : "bad"}`}>
-                  {unknown ? "Checking…" : online ? "Online" : "Unreachable"}
-                </span>
-              </div>
-              <div className="stat">
-                <span className="stat-label">Version</span>
-                <span className="stat-value">{status?.version ?? "—"}</span>
-              </div>
-              <div className="stat">
-                <span className="stat-label">Uptime</span>
-                <span className="stat-value">{online ? fmtUptime(status?.uptime) : "—"}</span>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {loading && <p className="muted loading-text">Checking session…</p>}
-
-        {!loading && firebaseConfigured && !signedIn && (
-          <>
-            <SignInPanel />
-            <section className="status-card">
-              <div className="status-card-head">
-                <h2>Backend status</h2>
-                <span className="muted">updates every 10s</span>
-              </div>
-              <div className="status-grid">
-                <div className="stat">
-                  <span className="stat-label">Status</span>
-                  <span className={`stat-value ${online ? "ok" : "bad"}`}>
-                    {unknown ? "Checking…" : online ? "Online" : "Unreachable"}
-                  </span>
-                </div>
-                <div className="stat">
-                  <span className="stat-label">Version</span>
-                  <span className="stat-value">{status?.version ?? "—"}</span>
-                </div>
-                <div className="stat">
-                  <span className="stat-label">Uptime</span>
-                  <span className="stat-value">{online ? fmtUptime(status?.uptime) : "—"}</span>
-                </div>
-              </div>
-              {!online && !unknown && (
-                <p className="hint">
-                  The API server isn’t running. Start it with <code>npm run start:server</code>{" "}
-                  (Firebase env vars required) or run <code>npm run dev:full</code> to launch both.
-                </p>
-              )}
-            </section>
-          </>
-        )}
-
-        {!loading && signedIn && (
-          <DevicesView token={token} onTokenExpired={() => void refreshToken()} />
-        )}
-
-        <section className="features">
-          {FEATURES.map((f) => (
-            <article className="feature" key={f.title}>
-              <span className="feature-icon">{f.icon}</span>
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
-            </article>
-          ))}
-        </section>
-
-        <section className="endpoints">
-          <h2>API endpoints</h2>
-          <div className="endpoint-list">
-            {ENDPOINTS.map(([method, path, desc]) => (
-              <div className="endpoint" key={path}>
-                <span className={`method method-${method.toLowerCase()}`}>{method}</span>
-                <code className="endpoint-path">{path}</code>
-                <span className="endpoint-desc">{desc}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      </main>
-
-      <footer>
-        <p>
-          System Utility <code>v3.1.0</code> · AES-256-GCM · Helmet · express-rate-limit
-        </p>
-      </footer>
-    </div>
+    <Console
+      token={token}
+      user={user}
+      status={{ online, unknown, version: status?.version }}
+      onTokenExpired={() => void refreshToken()}
+    />
   );
 }

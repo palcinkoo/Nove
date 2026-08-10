@@ -117,6 +117,31 @@ const decrypt = (text) => {
  }
 }
 
+// Telemetry history is stored as capped JSON arrays inside single RTDB nodes
+// (history/battery, history/events). Atomic transactions keep them bounded
+// (720 battery points ≈ 12h at a 60s heartbeat, 200 events) without any
+// prune-sweep job.
+const parseJsonArray = (raw) => {
+ if (Array.isArray(raw)) return raw
+ if (typeof raw === 'string') {
+   try {
+     const parsed = JSON.parse(raw)
+     return Array.isArray(parsed) ? parsed : []
+   } catch (e) {
+     return []
+   }
+ }
+ return []
+}
+
+const appendHistory = async (refPath, entry, cap) => {
+  await db.ref(refPath).transaction((current) => {
+    const arr = parseJsonArray(current)
+    arr.push(entry)
+    return JSON.stringify(arr.slice(-cap))
+  })
+}
+
 // Rate limiters
 const telemetryLimiter = rateLimit({
  windowMs: 5 * 60 * 1000,
@@ -233,7 +258,7 @@ app.get('/api/v2/devices', verifyUser, async (req, res) => {
 
 app.post('/api/v2/telemetry', telemetryLimiter, validateDeviceLoose, async (req, res) => {
  try {
- const { device_id, timestamp, status, battery, interval, pairing_code, pairing_request } = req.body
+ const { device_id, timestamp, status, battery, interval, pairing_code, pairing_request, type, permissions } = req.body
  const deviceId = sanitizeDeviceId(device_id) || req.deviceId
 
  // battery/interval are validated only when present: the heartbeat always
@@ -254,6 +279,18 @@ app.post('/api/v2/telemetry', telemetryLimiter, validateDeviceLoose, async (req,
  if (battery !== undefined) deviceUpdate.battery = battery
  if (interval !== undefined) deviceUpdate.interval = interval
  await db.ref(`devices/${deviceId}`).update(deviceUpdate)
+
+ // Battery history feeds the dashboard chart. Only heartbeats carry a
+ // battery value; event payloads (permission_lost, …) skip it.
+ if (typeof battery === 'number') {
+   await appendHistory(`devices/${deviceId}/history/battery`, { t: timestamp || Date.now(), b: battery }, 720)
+ }
+ // Explicit events feed the activity timeline (paired, permission_lost, …).
+ if (typeof type === 'string' && type.length > 0) {
+   const event = { type, ts: timestamp || Date.now() }
+   if (permissions !== undefined) event.data = { permissions }
+   await appendHistory(`devices/${deviceId}/history/events`, event, 200)
+ }
 
  // Pairing contract: an unpaired app advertises a 6-digit code in its
  // heartbeat. Persist it under pairing_requests/<deviceId> (only while the
@@ -350,9 +387,58 @@ app.post('/api/v2/pair', verifyUser, pairLimiter, async (req, res) => {
  await db.ref(`devices/${deviceId}/pairedTo`).set(userId)
  await db.ref(`devices/${deviceId}/pairing_code`).remove()
  await db.ref(`pairing_requests/${deviceId}`).remove()
+ await appendHistory(`devices/${deviceId}/history/events`, { type: 'paired', ts: Date.now(), data: { account: userId } }, 200)
  res.json({ success: true, deviceId })
  } catch (e) {
  console.error('pair:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
+})
+
+app.get('/api/v2/devices/:deviceId/history', verifyUser, async (req, res) => {
+ try {
+ const deviceId = sanitizeDeviceId(req.params.deviceId)
+ if (!deviceId) return res.status(400).json({ error: 'Invalid device ID' })
+
+ const access = await db.ref(`users/${req.uid}/devices/${deviceId}`).once('value')
+ if (!access.exists()) return res.status(403).json({ error: 'No access' })
+
+ const snap = await db.ref(`devices/${deviceId}/history`).once('value')
+ const val = snap.val() || {}
+ const battery = parseJsonArray(val.battery)
+ const events = parseJsonArray(val.events)
+
+ res.json({
+   success: true,
+   battery: battery.slice(-720),
+   // Newest first — ready for the timeline render.
+   events: events.slice(-200).reverse()
+ })
+ } catch (e) {
+ console.error('device history:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
+})
+
+app.get('/api/v2/activity', verifyUser, async (req, res) => {
+ try {
+ const uid = req.uid
+ const ownedSnap = await db.ref(`users/${uid}/devices`).once('value')
+ const ids = Object.keys(ownedSnap.val() || {})
+
+ const all = []
+ await Promise.all(ids.map(async (deviceId) => {
+   const snap = await db.ref(`devices/${deviceId}/history/events`).once('value')
+   const events = parseJsonArray(snap.val())
+   events.forEach((e) => {
+     if (e && typeof e.type === 'string') all.push({ deviceId, ...e })
+   })
+ }))
+
+ all.sort((a, b) => (b.ts || 0) - (a.ts || 0))
+ res.json({ success: true, activity: all.slice(0, 50) })
+ } catch (e) {
+ console.error('activity:', e.message)
  res.status(500).json({ error: 'Internal error' })
  }
 })

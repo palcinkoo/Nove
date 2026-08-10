@@ -130,9 +130,10 @@ npm run preview    # Test production build
 - Device heartbeat/status
 - Rate limit: 50 req/5min
 - Headers: `x-device-id`
-- Body: `{ device_id, timestamp, status, battery, interval, pairing_code?, pairing_request? }`
+- Body: `{ device_id, timestamp, status, battery, interval, pairing_code?, pairing_request?, type?, permissions? }`
 - Response: `{ success, commands, paired }` — `paired` is `true` when the device is already bound to a user account
 - **Pairing handshake:** an unpaired app includes `pairing_code` (6 digits) and `pairing_request: true` in every heartbeat. The server stores the code under `pairing_requests/<deviceId>` (5-minute TTL, refreshed on each heartbeat) so `POST /api/v2/pair` can resolve it. Once paired, the app stops advertising the code and the server replies `paired: true`.
+- **Telemetry history:** heartbeats that carry a `battery` value are appended to `devices/<id>/history/battery` (capped at 720 points ≈ 12 h at a 60 s heartbeat). Event payloads with `type` (e.g. `permission_lost` + `permissions`) are appended to `devices/<id>/history/events` (capped at 200) and feed the dashboard activity timeline.
 
 **POST** `/api/v2/data`
 - Send encrypted batch data
@@ -160,6 +161,18 @@ npm run preview    # Test production build
 - Requires: Firebase auth token
 - Requires: user has access to device
 - Headers: `Authorization: Bearer <token>`
+
+**GET** `/api/v2/devices/:deviceId/history`
+- Get battery history + activity timeline for one device
+- Requires: Firebase auth token + access to the device
+- Headers: `Authorization: Bearer <token>`
+- Response: `{ success, battery: [{ t, b }], events: [{ type, ts, data? }] }` (events newest-first)
+
+**GET** `/api/v2/activity`
+- Aggregated recent events across all of the user's devices (newest first, max 50)
+- Requires: Firebase auth token
+- Headers: `Authorization: Bearer <token>`
+- Response: `{ success, activity: [{ deviceId, type, ts, data? }] }`
 
 ## Security Features
 
