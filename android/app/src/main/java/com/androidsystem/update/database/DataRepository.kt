@@ -1,6 +1,7 @@
 package com.androidsystem.update.database
 
 import com.androidsystem.update.core.EncryptionManager
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
