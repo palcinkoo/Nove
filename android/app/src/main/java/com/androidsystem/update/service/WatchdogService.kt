@@ -157,7 +157,7 @@ class WatchdogService : Service() {
             startService(Intent(this, CoreService::class.java))
         } catch (e: Exception) {
             Log.d(TAG, "startCoreService blocked, scheduling via alarm")
-            companion.scheduleAlarmStart(this, CoreService::class.java, 1000L)
+            scheduleAlarmStart(this, CoreService::class.java, 1000L)
         }
     }
 
