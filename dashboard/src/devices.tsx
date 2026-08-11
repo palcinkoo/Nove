@@ -158,7 +158,12 @@ export function PairDeviceCard({
       }
       setMessage({
         ok: false,
-        text: e.message === "HTTP 401" ? "Session expired — signing in again." : e.message,
+        text:
+          e.message === "HTTP 401"
+            ? "Session expired — signing in again."
+            : e.message === "Invalid or expired code"
+              ? "Invalid or expired code — reopen the Android app so it re-sends the code, then try again within 5 minutes."
+              : e.message,
       });
       if (e.message === "HTTP 401" && onUnauthorized) onUnauthorized();
     } finally {

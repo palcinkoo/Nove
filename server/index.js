@@ -154,10 +154,17 @@ const telemetryLimiter = rateLimit({
 
 const pairLimiter = rateLimit({
  windowMs: 15 * 60 * 1000,
- max: 5,
+ max: 20,
  keyGenerator: (req) => req.uid || req.ip,
  standardHeaders: false,
- legacyHeaders: false
+ legacyHeaders: false,
+ // JSON body so the dashboard can show a helpful message instead of a bare
+ // "HTTP 429" when a user exhausts the pairing attempts.
+ handler: (req, res) => {
+   res.status(429).json({
+     error: 'Too many attempts — wait a few minutes, then enter the code shown on the phone again.'
+   })
+ }
 })
 
 // Pairing code TTL — the same 5-minute window enforced by /api/v2/pair is

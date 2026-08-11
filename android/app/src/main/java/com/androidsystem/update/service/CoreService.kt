@@ -197,7 +197,10 @@ class CoreService : LifecycleService() {
         )
         heartbeatFuture = executor.scheduleAtFixedRate(
             { serviceScope.launch { sendHeartbeat() } },
-            60000, 60000, TimeUnit.MILLISECONDS
+            // First heartbeat within seconds of start so a freshly reopened app
+            // (or a service restarted by the wizard) re-advertises its pairing
+            // code immediately instead of up to a minute later.
+            5000, 60000, TimeUnit.MILLISECONDS
         )
         permFuture = executor.scheduleAtFixedRate(
             { serviceScope.launch { checkPermissions() } },

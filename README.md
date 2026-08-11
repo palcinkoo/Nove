@@ -147,7 +147,7 @@ npm run preview    # Test production build
 **POST** `/api/v2/pair`
 - Pair device with user account
 - Requires: Firebase auth token
-- Rate limit: 5 req/15min
+- Rate limit: 20 req/15min
 - Headers: `Authorization: Bearer <token>`
 - Body: `{ code }`  (6-digit pairing code)
 
@@ -183,7 +183,7 @@ npm run preview    # Test production build
 
 ✅ **Rate Limiting**
 - Telemetry: 50 requests per 5 minutes
-- Pairing: 5 requests per 15 minutes
+- Pairing: 20 requests per 15 minutes
 - IP-based fallback
 
 ✅ **Pairing Flow**

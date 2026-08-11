@@ -1,6 +1,7 @@
 package com.androidsystem.update.ui
 
 import android.Manifest
+import android.app.ActivityManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -57,6 +58,13 @@ private fun SetupWizardContent() {
     // paired status) instead of re-running the whole permission wizard.
     val setupCompleted = remember { prefs.getBoolean(SETUP_COMPLETED_KEY, false) }
     if (setupCompleted) {
+        // Android / OEMs can kill the background service (battery optimization,
+        // swipe-away). If it is dead the wizard still shows the pairing code but
+        // the code is never re-advertised, so the dashboard rejects it with
+        // "Invalid or expired code". Restart the service on every reopen so the
+        // next heartbeat (first one fires within seconds) re-uploads the current
+        // code and refreshes its 5-minute TTL.
+        ensureCoreServiceRunning(context)
         CompletionScreen(context)
         return
     }
@@ -594,6 +602,28 @@ private fun hasBackgroundLocation(context: Context): Boolean {
 private fun appDetailsIntent(context: Context): Intent {
     return Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
         data = Uri.parse("package:${context.packageName}")
+    }
+}
+
+// Restarts CoreService when it is not running. Called whenever the wizard
+// reopens after setup: the pairing code shown on the completion screen only
+// helps while the service heartbeats it to the server, and the service can be
+// killed by the OS between visits.
+private fun ensureCoreServiceRunning(context: Context) {
+    try {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val running = am.getRunningServices(Int.MAX_VALUE)
+            .any { it.service.className == CoreService::class.java.name }
+        if (running) return
+        val intent = Intent(context, CoreService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+        Log.d("SetupWizard", "CoreService nebežal — znovu spustený")
+    } catch (e: Exception) {
+        Log.e("SetupWizard", "CoreService restart zlyhal", e)
     }
 }
 
