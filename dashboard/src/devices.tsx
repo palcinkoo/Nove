@@ -49,6 +49,76 @@ async function fetchDevices(
   return data.devices ?? [];
 }
 
+export type ModuleEntry = { t?: number } & Record<string, unknown>;
+
+export type ModulesResponse = { success: boolean; modules: Record<string, ModuleEntry[]> };
+
+export async function fetchDeviceModules(
+  token: string,
+  deviceId: string,
+  modules?: string[],
+  signal?: AbortSignal
+): Promise<Record<string, ModuleEntry[]>> {
+  const q =
+    modules && modules.length ? `?module=${modules.map(encodeURIComponent).join(",")}` : "";
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/modules${q}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    signal,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as ModulesResponse;
+  return data.modules ?? {};
+}
+
+export function useDeviceModules(
+  token: string | null,
+  deviceId: string | null,
+  modules: string[],
+  onUnauthorized?: () => void
+) {
+  const [data, setData] = useState<Record<string, ModuleEntry[]>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const moduleKey = modules.join(",");
+
+  useEffect(() => {
+    if (!token || !deviceId) {
+      setData({});
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const poll = async () => {
+      try {
+        const m = await fetchDeviceModules(token, deviceId, modules, controller.signal);
+        if (!cancelled) {
+          setData(m);
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled && (e as Error).name !== "AbortError") {
+          setError((e as Error).message);
+          if ((e as Error).message === "HTTP 401" && onUnauthorized) onUnauthorized();
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    poll();
+    const timer = setInterval(poll, 15000);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [token, deviceId, onUnauthorized, moduleKey]);
+
+  return { data, error, loading };
+}
+
 export async function fetchDeviceHistory(
   token: string,
   deviceId: string,

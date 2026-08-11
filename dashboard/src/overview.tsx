@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ActivityFeed, useActivity } from "./activity";
 import {
   batteryClass,
@@ -12,7 +13,6 @@ import {
   type DeviceSummary,
 } from "./devices";
 import { fmtRelative } from "./format";
-import type { ConsoleTab } from "./console";
 
 function StatCard({
   label,
@@ -120,12 +120,11 @@ function DeviceHero({
 export function OverviewView({
   token,
   onTokenExpired,
-  onNavigate,
 }: {
   token: string | null;
   onTokenExpired?: () => void;
-  onNavigate: (tab: ConsoleTab) => void;
 }) {
+  const navigate = useNavigate();
   const { devices, loading } = useDevices(token, onTokenExpired);
   const { items: activity } = useActivity(token, onTokenExpired);
   const [now, setNow] = useState(() => Date.now());
@@ -151,6 +150,7 @@ export function OverviewView({
         <div>
           <h2>Dashboard</h2>
           <p className="muted">Device overview · live battery telemetry and activity</p>
+
         </div>
         {!loading && (
           <span className="pill pill-online">
@@ -168,7 +168,7 @@ export function OverviewView({
             Enter the 6-digit code from the Android app to pair your first device — it will then
             appear here with live battery telemetry, history charts and activity.
           </p>
-          <button className="btn-primary" onClick={() => onNavigate("devices")}>
+          <button className="btn-primary" onClick={() => navigate("/devices")}>
             Pair a device
           </button>
         </div>
@@ -205,7 +205,7 @@ export function OverviewView({
             <div className="overview-panel">
               <div className="panel-head">
                 <h3>Recent activity</h3>
-                <button className="link-btn" onClick={() => onNavigate("activity")}>
+                <button className="link-btn" onClick={() => navigate("/activity")}>
                   View all →
                 </button>
               </div>
@@ -215,7 +215,7 @@ export function OverviewView({
             <div className="overview-panel">
               <div className="panel-head">
                 <h3>Devices</h3>
-                <button className="link-btn" onClick={() => onNavigate("devices")}>
+                <button className="link-btn" onClick={() => navigate("/devices")}>
                   Manage →
                 </button>
               </div>
@@ -225,7 +225,7 @@ export function OverviewView({
                     key={d.deviceId}
                     device={d}
                     now={now}
-                    onOpen={() => onNavigate("devices")}
+                    onOpen={() => navigate("/devices")}
                   />
                 ))}
               </div>

