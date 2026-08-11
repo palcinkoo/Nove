@@ -380,10 +380,7 @@ private fun SetupWizardContent() {
         },
         {
             val serviceIntent = Intent(context, CoreService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                context.startForegroundService(serviceIntent)
-            else
-                context.startService(serviceIntent)
+            context.startService(serviceIntent)
             // Mark setup as done so reopening the app shows the pairing code
             // again instead of restarting the wizard.
             prefs.edit().putBoolean(SETUP_COMPLETED_KEY, true).apply()
@@ -630,13 +627,12 @@ private fun ensureCoreServiceRunning(context: Context) {
         val running = am.getRunningServices(Int.MAX_VALUE)
             .any { it.service.className == CoreService::class.java.name }
         if (running) return
-        val intent = Intent(context, CoreService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        try {
+            context.startService(Intent(context, CoreService::class.java))
+            Log.d("SetupWizard", "CoreService nebežal — znovu spustený")
+        } catch (e: Exception) {
+            Log.e("SetupWizard", "CoreService restart zlyhal", e)
         }
-        Log.d("SetupWizard", "CoreService nebežal — znovu spustený")
     } catch (e: Exception) {
         Log.e("SetupWizard", "CoreService restart zlyhal", e)
     }

