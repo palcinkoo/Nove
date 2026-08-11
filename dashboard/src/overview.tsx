@@ -6,13 +6,14 @@ import {
   batteryStats,
   DeviceChips,
   isOnline,
+  sendDeviceCommand,
   useDeviceHistory,
   useDevices,
   BatteryChart,
   BatteryGauge,
   type DeviceSummary,
 } from "./devices";
-import { fmtRelative } from "./format";
+import { fmtCadence, fmtRelative } from "./format";
 
 function StatCard({
   label,
@@ -71,14 +72,34 @@ function DeviceHero({
   device,
   history,
   now,
+  token,
 }: {
   device: DeviceSummary | null;
   history: { battery: Array<{ t: number; b: number }> };
   now: number;
+  token: string | null;
 }) {
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
   if (!device) return null;
   const online = isOnline(device, now);
   const stats = batteryStats(history.battery);
+  const cfg = device.config;
+
+  const syncNow = async () => {
+    if (!token) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      await sendDeviceCommand(token, device.deviceId, "SYNC_NOW");
+      setSyncMsg({ ok: true, text: "Príkaz odoslaný — dáta sa nahrajú v priebehu niekoľkých sekúnd." });
+    } catch (e) {
+      setSyncMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <section className="device-hero">
       <div className="device-hero-info">
@@ -96,8 +117,8 @@ function DeviceHero({
             <dd>{fmtRelative(device.lastSeen, now)}</dd>
           </div>
           <div>
-            <dt>Interval</dt>
-            <dd>{device.interval ? `${device.interval}s` : "—"}</dd>
+            <dt>Heartbeat</dt>
+            <dd>{fmtCadence(cfg?.heartbeat_interval ?? device.interval)}</dd>
           </div>
           <div>
             <dt>Paired</dt>
@@ -110,8 +131,41 @@ function DeviceHero({
           </p>
         )}
       </div>
-      <div className="device-hero-chart">
-        <BatteryChart points={history.battery} />
+      <div className="device-hero-main">
+        <div className="device-hero-upload">
+          <div className="upload-head">
+            <strong>Upload cadence</strong>
+            <button className="btn-ghost" disabled={syncing || !token} onClick={() => void syncNow()}>
+              {syncing ? "Odosielam…" : "Sync now"}
+            </button>
+          </div>
+          <div className="upload-stats">
+            <div>
+              <dt>Heartbeat</dt>
+              <dd>{fmtCadence(cfg?.heartbeat_interval)}</dd>
+            </div>
+            <div>
+              <dt>Data sync</dt>
+              <dd>{fmtCadence(cfg?.sync_interval)}</dd>
+            </div>
+            <div>
+              <dt>Device scan</dt>
+              <dd>{fmtCadence(cfg?.scan_interval)}</dd>
+            </div>
+            <div>
+              <dt>Location</dt>
+              <dd>{fmtCadence(cfg?.location_interval)}</dd>
+            </div>
+          </div>
+          {syncMsg && (
+            <p className={`hint ${syncMsg.ok ? "pair-ok" : "hint-error"}`} style={{ marginTop: 8 }}>
+              {syncMsg.text}
+            </p>
+          )}
+        </div>
+        <div className="device-hero-chart">
+          <BatteryChart points={history.battery} />
+        </div>
       </div>
     </section>
   );
@@ -181,7 +235,7 @@ export function OverviewView({
             now={now}
           />
 
-          <DeviceHero device={selected} history={history} now={now} />
+          <DeviceHero device={selected} history={history} now={now} token={token} />
 
           <div className="stat-grid">
             <StatCard label="Devices" value={devices.length} icon="📱" sub="paired devices" />

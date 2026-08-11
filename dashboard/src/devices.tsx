@@ -2,6 +2,14 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { ActivityFeed } from "./activity";
 import { fmtDateTime, fmtRelative, fmtTime } from "./format";
 
+export type DeviceConfig = {
+  heartbeat_interval?: number;
+  sync_interval?: number;
+  scan_interval?: number;
+  location_interval?: number;
+  updatedAt?: number;
+};
+
 export type DeviceSummary = {
   deviceId: string;
   status: string;
@@ -10,7 +18,27 @@ export type DeviceSummary = {
   lastSeen: number | null;
   updatedAt: number | null;
   pairedAt: number | null;
+  config?: DeviceConfig | null;
 };
+
+export async function sendDeviceCommand(
+  token: string,
+  deviceId: string,
+  type: string,
+  extra?: Record<string, unknown>
+): Promise<void> {
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/command`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ type, ...extra }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+}
 
 export type BatteryPoint = { t: number; b: number };
 

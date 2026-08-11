@@ -588,6 +588,13 @@ class CoreService : LifecycleService() {
                 // Server contract: interval is in seconds (30..3600). The
                 // heartbeat fires every 60s regardless of the scan interval.
                 put("interval", 60)
+                // Upload cadence reported to the dashboard (all in seconds).
+                put("config", JSONObject().apply {
+                    put("heartbeat_interval", 60)
+                    put("sync_interval", SYNC_INTERVAL / 1000)
+                    put("scan_interval", scanIntervalMinutes * 60)
+                    put("location_interval", configManager.getLocationInterval() / 1000)
+                })
                 if (!isPaired) {
                     val code = prefs.getString(PAIRING_CODE_KEY, null) ?: generatePairingCode()
                     put("pairing_code", code)

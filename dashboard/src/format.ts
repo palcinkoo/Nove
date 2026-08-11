@@ -28,3 +28,13 @@ export const fmtUptime = (s?: number): string => {
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 };
+
+// Seconds → human cadence: 60 → "60s", 300 → "5 min", 3600 → "1 h".
+export const fmtCadence = (s?: number | null): string => {
+  if (!s || s <= 0) return "—";
+  if (s < 60) return `${s}s`;
+  const m = s / 60;
+  if (m < 60) return `${Number.isInteger(m) ? m : Math.round(m * 10) / 10} min`;
+  const h = m / 60;
+  return `${Number.isInteger(h) ? h : Math.round(h * 10) / 10} h`;
+};

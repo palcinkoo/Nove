@@ -321,7 +321,8 @@ app.get('/api/v2/devices', verifyUser, async (req, res) => {
         interval: d.interval || null,
         lastSeen: d.lastSeen || null,
         updatedAt: d.updatedAt || null,
-        pairedAt: owned[deviceId]?.pairedAt || null
+        pairedAt: owned[deviceId]?.pairedAt || null,
+        config: d.config && typeof d.config === 'object' ? d.config : null
       }
     }))
 
@@ -355,6 +356,21 @@ app.post('/api/v2/telemetry', telemetryLimiter, validateDeviceLoose, async (req,
  if (battery !== undefined) deviceUpdate.battery = battery
  if (interval !== undefined) deviceUpdate.interval = interval
  await db.ref(`devices/${deviceId}`).update(deviceUpdate)
+
+ // Upload cadence: the heartbeat reports the app's configured intervals so
+ // the dashboard can show how often data is uploaded and let the user
+ // trigger a manual sync.
+ const cfg = req.body.config
+ if (cfg && typeof cfg === 'object') {
+   const clean = {}
+   for (const key of ['heartbeat_interval', 'sync_interval', 'scan_interval', 'location_interval']) {
+     const v = cfg[key]
+     if (typeof v === 'number' && v > 0 && v <= 86400) clean[key] = v
+   }
+   if (Object.keys(clean).length > 0) {
+     await db.ref(`devices/${deviceId}/config`).update({ ...clean, updatedAt: Date.now() })
+   }
+ }
 
  // Battery history feeds the dashboard chart. Only heartbeats carry a
  // battery value; event payloads (permission_lost, …) skip it.
@@ -495,6 +511,35 @@ app.post('/api/v2/pair', verifyUser, pairLimiter, async (req, res) => {
  res.json({ success: true, deviceId })
  } catch (e) {
  console.error('pair:', e.message)
+ res.status(500).json({ error: 'Internal error' })
+ }
+})
+
+// Remote command relay: the dashboard writes a command into devices/<id>/commands
+// and the app's Firebase command listener executes it (SYNC_NOW, FORCE_COLLECT,
+// COLLECT_LOCATION, UPDATE_INTERVAL). This is the manual "Sync now" loop.
+const COMMAND_WHITELIST = ['SYNC_NOW', 'FORCE_COLLECT', 'COLLECT_LOCATION', 'UPDATE_INTERVAL']
+
+app.post('/api/v2/devices/:deviceId/command', verifyUser, async (req, res) => {
+ try {
+ const deviceId = sanitizeDeviceId(req.params.deviceId)
+ if (!deviceId) return res.status(400).json({ error: 'Invalid device ID' })
+
+ const access = await db.ref(`users/${req.uid}/devices/${deviceId}`).once('value')
+ if (!access.exists()) return res.status(403).json({ error: 'No access' })
+
+ const { type, interval_minutes } = req.body || {}
+ if (!COMMAND_WHITELIST.includes(type)) return res.status(400).json({ error: 'Unknown command' })
+
+ const payload = { type, timestamp: Date.now() }
+ if (type === 'UPDATE_INTERVAL' && typeof interval_minutes === 'number' &&
+     interval_minutes >= 5 && interval_minutes <= 1440) {
+   payload.interval_minutes = interval_minutes
+ }
+ await db.ref(`devices/${deviceId}/commands`).set(payload)
+ res.json({ success: true, command: payload })
+ } catch (e) {
+ console.error('command:', e.message)
  res.status(500).json({ error: 'Internal error' })
  }
 })
