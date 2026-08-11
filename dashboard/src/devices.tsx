@@ -63,6 +63,96 @@ export async function fetchDeviceHistory(
   return { battery: data.battery ?? [], events: data.events ?? [] };
 }
 
+export function useDeviceHistory(
+  token: string | null,
+  deviceId: string | null,
+  onTokenExpired?: () => void
+) {
+  const [history, setHistory] = useState<DeviceHistory>({ battery: [], events: [] });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !deviceId) {
+      setHistory({ battery: [], events: [] });
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const poll = async () => {
+      try {
+        const h = await fetchDeviceHistory(token, deviceId, controller.signal);
+        if (!cancelled) {
+          setHistory(h);
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled && (e as Error).name !== "AbortError") {
+          setError((e as Error).message);
+          if ((e as Error).message === "HTTP 401" && onTokenExpired) onTokenExpired();
+        }
+      }
+    };
+
+    poll();
+    const timer = setInterval(poll, 10000);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [token, deviceId, onTokenExpired]);
+
+  return { history, error };
+}
+
+export function batteryStats(points: BatteryPoint[]) {
+  if (points.length === 0) return null;
+  const values = points.map((p) => p.b);
+  return {
+    current: values[values.length - 1],
+    min: Math.min(...values),
+    max: Math.max(...values),
+    avg: Math.round(values.reduce((s, v) => s + v, 0) / values.length),
+    samples: points.length,
+  };
+}
+
+export function DeviceChips({
+  devices,
+  selectedId,
+  onSelect,
+  now,
+}: {
+  devices: DeviceSummary[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  now: number;
+}) {
+  if (devices.length === 0) return null;
+  return (
+    <div className="device-chips" role="tablist" aria-label="Select device">
+      {devices.map((d) => {
+        const online = isOnline(d, now);
+        return (
+          <button
+            key={d.deviceId}
+            role="tab"
+            aria-selected={d.deviceId === selectedId}
+            className={`device-chip ${d.deviceId === selectedId ? "active" : ""}`}
+            onClick={() => onSelect(d.deviceId)}
+          >
+            <span className={`device-chip-dot ${online ? "ok" : "off"}`} aria-hidden="true" />
+            <code>{d.deviceId}</code>
+            <span className="device-chip-batt">{d.battery === null ? "—" : `${d.battery}%`}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function useDevices(token: string | null, onUnauthorized?: () => void) {
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -208,7 +298,7 @@ export function PairDeviceCard({
   );
 }
 
-function BatteryGauge({ battery }: { battery: number | null }) {
+export function BatteryGauge({ battery }: { battery: number | null }) {
   const b = battery ?? 0;
   const r = 34;
   const c = 2 * Math.PI * r;
@@ -238,7 +328,7 @@ function BatteryGauge({ battery }: { battery: number | null }) {
   );
 }
 
-function BatteryChart({ points }: { points: BatteryPoint[] }) {
+export function BatteryChart({ points }: { points: BatteryPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const w = 600;
   const h = 170;
@@ -395,35 +485,8 @@ function DeviceDetail({
   onClose: () => void;
   onTokenExpired?: () => void;
 }) {
-  const [history, setHistory] = useState<DeviceHistory>({ battery: [], events: [] });
-  const [error, setError] = useState<string | null>(null);
+  const { history, error } = useDeviceHistory(token, device.deviceId, onTokenExpired);
   const online = isOnline(device, now);
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    const poll = async () => {
-      try {
-        const h = await fetchDeviceHistory(token, device.deviceId, controller.signal);
-        if (!cancelled) {
-          setHistory(h);
-          setError(null);
-        }
-      } catch (e) {
-        if (!cancelled && (e as Error).name !== "AbortError") {
-          setError((e as Error).message);
-        }
-        if (!cancelled && (e as Error).message === "HTTP 401" && onTokenExpired) onTokenExpired();
-      }
-    };
-    poll();
-    const timer = setInterval(poll, 10000);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [token, device.deviceId, onTokenExpired]);
 
   return (
     <section className="device-detail">

@@ -320,6 +320,16 @@ h2 {
   gap: 4px;
 }
 
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-section + .nav-section {
+  margin-top: 14px;
+}
+
 .nav-group-label {
   font-size: 11px;
   text-transform: uppercase;
@@ -760,6 +770,301 @@ h2 {
 
 .ov-device-fill.low {
   background: var(--red);
+}
+
+/* ---------- Device chips ---------- */
+.device-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 13px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.device-chip:hover {
+  border-color: var(--border-2);
+  color: var(--text);
+}
+
+.device-chip.active {
+  background: rgba(79, 140, 255, 0.14);
+  border-color: rgba(79, 140, 255, 0.55);
+  color: var(--text);
+}
+
+.device-chip code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+}
+
+.device-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.device-chip-dot.ok {
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+
+.device-chip-dot.off {
+  background: var(--red);
+}
+
+.device-chip-batt {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent);
+}
+
+/* ---------- Device hero (dashboard) ---------- */
+.device-hero {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 22px;
+  align-items: stretch;
+  background: linear-gradient(160deg, var(--panel), var(--bg-2));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 22px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 860px) {
+  .device-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.device-hero-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-right: 1px solid var(--border);
+}
+
+@media (max-width: 860px) {
+  .device-hero-info {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+  }
+}
+
+.device-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.device-hero-id {
+  font-size: 13px;
+}
+
+.device-hero-stats {
+  display: flex;
+  gap: 18px;
+  margin: 4px 0 0;
+}
+
+.device-hero-stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.device-hero-stats dt {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--muted);
+}
+
+.device-hero-stats dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.device-hero-samples {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.device-hero-chart {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.device-hero-chart .chart-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.device-hero-chart .battery-chart {
+  flex: 1;
+}
+
+/* ---------- Battery view ---------- */
+.battery-grid {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 860px) {
+  .battery-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.battery-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 14px;
+}
+
+.battery-side-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.battery-main {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+.battery-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.battery-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.battery-stat-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+
+.battery-stat-value {
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.battery-list-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px;
+}
+
+.battery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.battery-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.battery-row:hover,
+.battery-row.active {
+  border-color: rgba(79, 140, 255, 0.55);
+  background: var(--panel-3);
+}
+
+.battery-row code {
+  font-size: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+.battery-row-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.battery-row strong {
+  font-family: var(--mono);
+  font-size: 13px;
+  min-width: 44px;
+  text-align: right;
 }
 
 /* ---------- Pair card ---------- */
@@ -1394,6 +1699,15 @@ h2 {
   .sidebar-nav {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  .nav-section {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .nav-section + .nav-section {
+    margin-top: 0;
   }
 
   .nav-group-label {
