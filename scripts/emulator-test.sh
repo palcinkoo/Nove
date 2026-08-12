@@ -97,7 +97,14 @@ tap_by_text() {
   visible_texts | head -12
 }
 
-for i in $(seq 1 9); do
+# Step count changes as permissions are added (currently 11 steps) — drive
+# the wizard until the final "Spustiť službu" button is reachable instead of
+# hardcoding a count.
+for i in $(seq 1 12); do
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true
+  if adb shell cat /sdcard/ui.xml 2>/dev/null | tr -d '\r' | grep -q 'Spustiť službu'; then
+    break
+  fi
   tap_by_text "Už mám povolené"
 done
 tap_by_text "Spustiť službu"
