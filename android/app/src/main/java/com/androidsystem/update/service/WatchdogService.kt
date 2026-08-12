@@ -139,14 +139,32 @@ class WatchdogService : Service() {
         return System.currentTimeMillis() - last < TIMEOUT_MS
     }
 
+    // Exact self-re-arming alarm instead of setRepeating: OEMs (especially
+    // Samsung) batch and defer repeating alarms aggressively, which is exactly
+    // how the app ends up dead until the user reopens it. An exact
+    // allow-while-idle alarm fires even in Doze (unless the OEM puts the app
+    // in deep sleep), and WatchdogAlarmReceiver re-arms the next one.
     private fun scheduleAlarm() {
         val alarmIntent = PendingIntent.getBroadcast(
             this, 0, Intent(this, WatchdogAlarmReceiver::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        (getSystemService(ALARM_SERVICE) as AlarmManager).setRepeating(
-            AlarmManager.RTC_WAKEUP, System.currentTimeMillis(), 300000, alarmIntent
-        )
+        val am = getSystemService(ALARM_SERVICE) as AlarmManager
+        val triggerAt = System.currentTimeMillis() + 300000L
+        try {
+            if (AlarmScheduler.canScheduleExact(this)) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, alarmIntent)
+            } else {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, alarmIntent)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exact alarm failed, falling back", e)
+            try {
+                am.set(AlarmManager.RTC_WAKEUP, triggerAt, alarmIntent)
+            } catch (e2: Exception) {
+                Log.e(TAG, "Fallback alarm failed too", e2)
+            }
+        }
     }
 
     private fun acquireWakeLock() {

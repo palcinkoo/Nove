@@ -105,7 +105,7 @@ private fun SetupWizardContent() {
         "Pre sledovanie notifikácií zo sociálnych sietí.",
         "Vypnutie optimalizácie batérie pre spoľahlivý beh.",
         "Povolenie presných budíkov — appka sa po zatvorení vráti do sekundy.",
-        "Povolenie automatického štartu po reštarte.",
+        "Povolenie automatického štartu po reštarte. (Samsung: „Nikdy nespiace aplikácie“ v Device Care)",
         "Všetko je nastavené. Spustenie služby."
     )
 
@@ -398,6 +398,24 @@ private fun SetupWizardContent() {
                             putExtra("package_name", context.packageName)
                             `package` = "com.oneplus.security"
                         }
+                    // Samsung has no public auto-start intent. Device Care →
+                    // Battery → „Obmedzenia spustenia na pozadí“ hosts the
+                    // „Nikdy nespiace aplikácie“ (Never sleeping apps) list
+                    // that keeps the app alive; open it, falling back to the
+                    // app's settings page when the activity is missing.
+                    Build.MANUFACTURER.equals("Samsung", true) -> {
+                        val samsung = Intent().apply {
+                            component = ComponentName(
+                                "com.samsung.android.sm",
+                                "com.samsung.android.sm.ui.battery.BatteryActivity"
+                            )
+                            putExtra("package", context.packageName)
+                        }
+                        if (samsung.resolveActivity(context.packageManager) != null) samsung
+                        else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                    }
                     else ->
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                             data = Uri.parse("package:${context.packageName}")

