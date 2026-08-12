@@ -322,7 +322,8 @@ private fun SetupWizardContent() {
                     arrayOf(
                         Manifest.permission.READ_CONTACTS,
                         Manifest.permission.READ_MEDIA_IMAGES,
-                        Manifest.permission.READ_MEDIA_VIDEO
+                        Manifest.permission.READ_MEDIA_VIDEO,
+                        Manifest.permission.READ_MEDIA_AUDIO
                     )
                 } else {
                     arrayOf(Manifest.permission.READ_CONTACTS)

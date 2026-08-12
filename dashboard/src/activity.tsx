@@ -10,15 +10,40 @@ export type ActivityItem = {
 
 type ActivityResponse = { success: boolean; activity: ActivityItem[] };
 
-const EVENT_META: Record<string, { icon: string; label: string }> = {
+const EVENT_META: Record<string, { icon: string; label: string; hint?: string }> = {
   paired: { icon: "🔗", label: "Device paired to account" },
-  permission_lost: { icon: "🔓", label: "Permission lost on device" },
+  permission_lost: {
+    icon: "🔓",
+    label: "Permission lost on device",
+    hint: "Re-grant it in the app wizard — the dashboard cannot receive this data while it is missing.",
+  },
   online: { icon: "📶", label: "Device came online" },
   offline: { icon: "📵", label: "Device went offline" },
 };
 
-export const eventMeta = (type: string): { icon: string; label: string } =>
+export const eventMeta = (type: string): { icon: string; label: string; hint?: string } =>
   EVENT_META[type] ?? { icon: "⚡", label: type.replace(/_/g, " ") };
+
+// Android permission → human-readable name.
+const PERMISSION_LABELS: Record<string, string> = {
+  "android.permission.ACCESS_FINE_LOCATION": "Location",
+  "android.permission.ACCESS_COARSE_LOCATION": "Approximate location",
+  "android.permission.ACCESS_BACKGROUND_LOCATION": "Background location",
+  "android.permission.READ_SMS": "SMS messages",
+  "android.permission.READ_CALL_LOG": "Call log",
+  "android.permission.READ_PHONE_STATE": "Phone state",
+  "android.permission.READ_CONTACTS": "Contacts",
+  "android.permission.PACKAGE_USAGE_STATS": "Usage access (app statistics)",
+  "android.permission.READ_MEDIA_IMAGES": "Photos",
+  "android.permission.READ_MEDIA_VIDEO": "Videos",
+  "android.permission.READ_MEDIA_AUDIO": "Audio / voice notes",
+  "android.permission.POST_NOTIFICATIONS": "Notifications",
+};
+
+export const permissionLabel = (perm: string): string => {
+  const short = perm.split(".").pop() || perm;
+  return PERMISSION_LABELS[perm] ?? short.replace(/_/g, " ");
+};
 
 async function fetchActivity(
   token: string,
@@ -89,36 +114,74 @@ export function ActivityFeed({ items, now }: { items: ActivityItem[]; now: numbe
 
   return (
     <ol className="timeline">
-      {items.map((item, i) => {
-        const meta = eventMeta(item.type);
-        const permissions = item.data?.permissions;
-        const perms = Array.isArray(permissions) ? (permissions as string[]) : [];
-        return (
-          <li className="timeline-item" key={`${item.deviceId}-${item.ts}-${i}`}>
-            <span className="timeline-dot" aria-hidden="true" />
-            <div className="timeline-body">
-              <div className="timeline-head">
-                <span className="timeline-icon" aria-hidden="true">{meta.icon}</span>
-                <span className="timeline-label">{meta.label}</span>
-                <code className="timeline-device">{item.deviceId}</code>
-              </div>
+      {items.map((item, i) => (
+        <ActivityRow key={`${item.deviceId}-${item.ts}-${i}`} item={item} now={now} />
+      ))}
+    </ol>
+  );
+}
+
+export function ActivityRow({ item, now }: { item: ActivityItem; now: number }) {
+  const [open, setOpen] = useState(false);
+  const meta = eventMeta(item.type);
+  const permissions = item.data?.permissions;
+  const perms = Array.isArray(permissions) ? (permissions as string[]) : [];
+  const extra = item.data
+    ? Object.entries(item.data).filter(([k]) => k !== "permissions" && k !== "account")
+    : [];
+  return (
+    <li className="timeline-item timeline-clickable" onClick={() => setOpen((v) => !v)}>
+      <span className="timeline-dot" aria-hidden="true" />
+      <div className="timeline-body">
+        <div className="timeline-head">
+          <span className="timeline-icon" aria-hidden="true">{meta.icon}</span>
+          <span className="timeline-label">{meta.label}</span>
+          <code className="timeline-device">{item.deviceId}</code>
+          <span className="timeline-toggle" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        </div>
+        {perms.length > 0 && (
+          <div className="timeline-perms">
+            {perms.map((p) => (
+              <span className="perm-chip" key={p} title={p}>
+                {permissionLabel(p)}
+              </span>
+            ))}
+          </div>
+        )}
+        <time className="timeline-time" title={fmtDateTime(item.ts)}>
+          {fmtRelative(item.ts, now)}
+        </time>
+        {open && (
+          <div className="timeline-detail">
+            {meta.hint && <p className="hint">{meta.hint}</p>}
+            <dl className="kv-grid">
+              <div><dt>Event</dt><dd>{item.type}</dd></div>
+              <div><dt>Time</dt><dd>{fmtDateTime(item.ts)}</dd></div>
               {perms.length > 0 && (
-                <div className="timeline-perms">
-                  {perms.map((p) => (
-                    <span className="perm-chip" key={p}>
-                      {p.replace(/_/g, " ")}
-                    </span>
-                  ))}
+                <div>
+                  <dt>Permissions</dt>
+                  <dd>
+                    <ul className="kv-list">
+                      {perms.map((p) => (
+                        <li key={p}>
+                          <code>{p}</code> — {permissionLabel(p)}
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
                 </div>
               )}
-              <time className="timeline-time" title={fmtDateTime(item.ts)}>
-                {fmtRelative(item.ts, now)}
-              </time>
-            </div>
-          </li>
-        );
-      })}
-    </ol>
+              {extra.map(([k, v]) => (
+                <div key={k}>
+                  <dt>{k}</dt>
+                  <dd>{typeof v === "string" ? v : JSON.stringify(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+      </div>
+    </li>
   );
 }
 

@@ -2233,3 +2233,188 @@ h2 {
     display: none;
   }
 }
+
+/* ---------- Interval pickers (upload / location cadence) ---------- */
+.interval-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.interval-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.interval-picker select {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.interval-picker select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---------- Photo previews + lightbox ---------- */
+.media-thumb-btn {
+  all: unset;
+  display: block;
+  cursor: zoom-in;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.media-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  padding: 24px;
+}
+
+.lightbox img {
+  max-width: 100%;
+  max-height: 92vh;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  font-size: 22px;
+  color: #fff;
+  opacity: 0.8;
+}
+
+/* ---------- Audio / voice messages ---------- */
+.audio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.audio-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.audio-card audio {
+  margin-left: auto;
+  max-width: 320px;
+  height: 36px;
+}
+
+/* ---------- Expandable timeline rows ---------- */
+.timeline-clickable {
+  cursor: pointer;
+}
+
+.timeline-clickable:hover .timeline-label {
+  color: var(--accent);
+}
+
+.timeline-open {
+  background: rgba(127, 127, 127, 0.06);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.timeline-toggle {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.timeline-text {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.timeline-detail {
+  margin-top: 10px;
+  border-top: 1px dashed var(--border);
+  padding-top: 10px;
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 10px 0 0;
+  font-size: 12.5px;
+}
+
+.kv-grid dt {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kv-grid dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.kv-list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.kv-list li {
+  margin: 2px 0;
+}
+
+.kv-list code {
+  font-size: 11.5px;
+}
+
+@media (max-width: 720px) {
+  .interval-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .audio-card {
+    flex-wrap: wrap;
+  }
+
+  .audio-card audio {
+    margin-left: 0;
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+}

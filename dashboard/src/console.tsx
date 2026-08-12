@@ -22,6 +22,7 @@ import {
   DeviceModule,
   WifiModule,
   KeywordsModule,
+  AudioModule,
 } from "./modules";
 
 /* ---------- icons ---------- */
@@ -117,6 +118,7 @@ const NAV: NavSection[] = [
     items: [
       { path: "/photos", label: "Photos", desc: "Images", icon: I.photos },
       { path: "/videos", label: "Videos", desc: "Video files", icon: I.video },
+      { path: "/audio", label: "Voice Messages", desc: "Audio recordings", icon: I.video },
     ],
   },
   {
@@ -386,6 +388,19 @@ function AppRoutes({
             desc="Video files from the device media library"
             collections={["media"]}
             render={(m) => <MediaModule entries={m.media ?? []} kind="videos" />}
+          />
+        }
+      />
+      <Route
+        path="/audio"
+        element={
+          <ModulePage
+            token={token}
+            onTokenExpired={onTokenExpired}
+            title="Voice Messages"
+            desc="Audio recordings and voice notes from the device (up to 1 MB each)"
+            collections={["audio"]}
+            render={(m) => <AudioModule entries={m.audio ?? []} />}
           />
         }
       />

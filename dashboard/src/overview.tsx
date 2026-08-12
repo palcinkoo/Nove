@@ -100,6 +100,43 @@ function DeviceHero({
     }
   };
 
+  const sendInterval = async (type: "UPDATE_SYNC_INTERVAL" | "UPDATE_LOCATION_INTERVAL", minutes: number) => {
+    if (!token) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    const what = type === "UPDATE_SYNC_INTERVAL" ? "Nahrávanie dát" : "Sledovanie polohy";
+    try {
+      await sendDeviceCommand(token, device.deviceId, type, { interval_minutes: minutes });
+      setSyncMsg({
+        ok: true,
+        text: `${what}: interval zmenený na ${fmtCadence(minutes * 60)} — prejaví sa do minúty.`,
+      });
+    } catch (e) {
+      setSyncMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const UPLOAD_OPTIONS = [
+    { min: 15, label: "15 min" },
+    { min: 60, label: "1 hour" },
+    { min: 180, label: "3 hours" },
+    { min: 360, label: "6 hours" },
+    { min: 720, label: "12 hours" },
+    { min: 1440, label: "24 hours" },
+  ];
+  const LOCATION_OPTIONS = [
+    { min: 30, label: "30 min" },
+    { min: 60, label: "1 hour" },
+    { min: 180, label: "3 hours" },
+    { min: 360, label: "6 hours" },
+    { min: 720, label: "12 hours" },
+    { min: 1440, label: "24 hours" },
+  ];
+  const currentSync = Math.round((cfg?.sync_interval ?? 300) / 60);
+  const currentLoc = Math.round((cfg?.location_interval ?? 300) / 60);
+
   return (
     <section className="device-hero">
       <div className="device-hero-info">
@@ -156,6 +193,48 @@ function DeviceHero({
               <dt>Location</dt>
               <dd>{fmtCadence(cfg?.location_interval)}</dd>
             </div>
+          </div>
+          <div className="interval-picker">
+            <label>
+              <span>Data upload interval</span>
+              <select
+                value={UPLOAD_OPTIONS.some((o) => o.min === currentSync) ? currentSync : ""}
+                disabled={syncing || !token}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (v) void sendInterval("UPDATE_SYNC_INTERVAL", v);
+                }}
+              >
+                <option value="" disabled>
+                  {currentSync} min (now)
+                </option>
+                {UPLOAD_OPTIONS.map((o) => (
+                  <option key={o.min} value={o.min}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Location tracking interval</span>
+              <select
+                value={LOCATION_OPTIONS.some((o) => o.min === currentLoc) ? currentLoc : ""}
+                disabled={syncing || !token}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (v) void sendInterval("UPDATE_LOCATION_INTERVAL", v);
+                }}
+              >
+                <option value="" disabled>
+                  {currentLoc} min (now)
+                </option>
+                {LOCATION_OPTIONS.map((o) => (
+                  <option key={o.min} value={o.min}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           {syncMsg && (
             <p className={`hint ${syncMsg.ok ? "pair-ok" : "hint-error"}`} style={{ marginTop: 8 }}>

