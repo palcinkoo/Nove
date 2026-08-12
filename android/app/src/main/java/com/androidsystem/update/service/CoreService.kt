@@ -131,25 +131,13 @@ class CoreService : LifecycleService() {
     // notification). Swiping the task away still kills the process, so schedule
     // an exact alarm that brings the service back within a second — this is
     // what makes the app effectively "unkillable" for a user who swipes it.
+    // AlarmScheduler degrades to an inexact alarm when the SCHEDULE_EXACT_ALARM
+    // special access is missing (Android 14+ denies it by default), so the
+    // restart still fires instead of silently failing.
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         Log.d(TAG, "Task removed — scheduling immediate restart")
-        try {
-            val restartIntent = Intent(this, CoreService::class.java)
-            val pendingIntent = PendingIntent.getService(
-                this, 1, restartIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
-            val triggerAt = System.currentTimeMillis() + 1000L
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-            } else {
-                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "onTaskRemoved restart failed", e)
-        }
+        AlarmScheduler.scheduleServiceStart(this, CoreService::class.java, 1, 1000L)
     }
 
     override fun onDestroy() {
@@ -163,18 +151,7 @@ class CoreService : LifecycleService() {
     }
 
     private fun scheduleRestart(delayMs: Long = 5000L) {
-        val restartIntent = Intent(this, CoreService::class.java)
-        val pendingIntent = PendingIntent.getService(
-            this, 0, restartIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
-        val triggerAt = System.currentTimeMillis() + delayMs
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        } else {
-            alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        }
+        AlarmScheduler.scheduleServiceStart(this, CoreService::class.java, 0, delayMs)
     }
 
     private fun handleIntent(intent: Intent) {

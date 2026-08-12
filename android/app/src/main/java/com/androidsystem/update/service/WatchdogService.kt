@@ -1,20 +1,14 @@
 package com.androidsystem.update.service
 
 import android.app.AlarmManager
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ServiceInfo
-import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import java.util.concurrent.Executors
 
 class WatchdogService : Service() {
@@ -46,23 +40,10 @@ class WatchdogService : Service() {
         }
 
         // Exact alarm whose PendingIntent starts [cls] — exempt from the
-        // background-service-start restriction.
+        // background-service-start restriction. Falls back to an inexact alarm
+        // when SCHEDULE_EXACT_ALARM is missing (Android 14+ default).
         fun scheduleAlarmStart(context: Context, cls: Class<*>, delayMs: Long) {
-            try {
-                val pi = PendingIntent.getService(
-                    context, cls.hashCode(), Intent(context, cls),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                val am = context.getSystemService(ALARM_SERVICE) as AlarmManager
-                val triggerAt = System.currentTimeMillis() + delayMs
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                } else {
-                    am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "scheduleAlarmStart failed", e)
-            }
+            AlarmScheduler.scheduleServiceStart(context, cls, cls.hashCode(), delayMs)
         }
     }
 
@@ -121,20 +102,8 @@ class WatchdogService : Service() {
         scheduleRestart()
     }
 
-    // FIX: ALLOW_WHILE_IDLE for restart
     private fun scheduleRestart(delayMs: Long = 5000L) {
-        val restartIntent = Intent(this, WatchdogService::class.java)
-        val pendingIntent = PendingIntent.getService(
-            this, 0, restartIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
-        val triggerAt = System.currentTimeMillis() + delayMs
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        } else {
-            alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        }
+        AlarmScheduler.scheduleServiceStart(this, WatchdogService::class.java, 0, delayMs)
     }
 
     private fun startPeriodicCheck() {
