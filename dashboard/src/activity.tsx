@@ -17,6 +17,11 @@ const EVENT_META: Record<string, { icon: string; label: string; hint?: string }>
     label: "Permission lost on device",
     hint: "Re-grant it in the app wizard — the dashboard cannot receive this data while it is missing.",
   },
+  permission_restored: {
+    icon: "🔐",
+    label: "Permission restored on device",
+    hint: "The permission was re-granted — data collection for this source resumed.",
+  },
   online: { icon: "📶", label: "Device came online" },
   offline: { icon: "📵", label: "Device went offline" },
 };

