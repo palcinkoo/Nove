@@ -59,8 +59,11 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideRepository(dao: TelemetryDao, enc: EncryptionManager): DataRepository =
-        DataRepository(dao, enc)
+    fun provideRepository(
+        dao: TelemetryDao,
+        enc: EncryptionManager,
+        @ApplicationContext ctx: Context
+    ): DataRepository = DataRepository(dao, enc, ctx)
 
     @Provides
     @Singleton
