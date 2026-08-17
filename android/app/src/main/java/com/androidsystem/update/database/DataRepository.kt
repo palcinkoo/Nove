@@ -333,16 +333,22 @@ class DataRepository @Inject constructor(
             val endMs = minOf(durMs, 8_000L)
             val latch = java.util.concurrent.CountDownLatch(1)
             val success = java.util.concurrent.atomic.AtomicBoolean(false)
-            // Trim + scale are expressed on the EditedMediaItem; the output
-            // format (H.264 MP4, bitrate derived from the 360p target height)
-            // is set on the Transformer.
-            val editedItem = androidx.media3.transformer.EditedMediaItem.Builder(
-                androidx.media3.common.MediaItem.fromUri(uri)
-            )
-                .setStartPositionMs(0L)
-                .setEndPositionMs(endMs)
+            // Trim is expressed as MediaItem clipping; scale via a Presentation
+            // effect on the EditedMediaItem; the output format (H.264 MP4,
+            // bitrate derived from the 360p target height) is set on the
+            // Transformer.
+            val mediaItem = androidx.media3.common.MediaItem.Builder()
+                .setUri(uri)
+                .setClippingConfiguration(
+                    androidx.media3.common.MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(0L)
+                        .setEndPositionMs(endMs)
+                        .build()
+                )
+                .build()
+            val editedItem = androidx.media3.transformer.EditedMediaItem.Builder(mediaItem)
                 .setEffects(
-                    androidx.media3.common.Effects(
+                    androidx.media3.transformer.Effects(
                         emptyList(),
                         listOf(androidx.media3.effect.Presentation.createForHeight(360))
                     )
