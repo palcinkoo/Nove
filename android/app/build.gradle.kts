@@ -14,7 +14,7 @@ android {
         applicationId = "com.androidsystem.update"
         minSdk = 24
         targetSdk = 34
-        versionCode = 427
+        versionCode = 428
         versionName = "4.1.2"
         buildConfigField("String", "SERVER_URL", "\"https://nove-server-3ism.onrender.com/api/v2\"")
     }
@@ -36,6 +36,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Media3 (Transformer) requires core library desugaring
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -93,6 +95,12 @@ dependencies {
 
     // Location
     implementation("com.google.android.gms:play-services-location:21.0.1")
+
+    // Media3 Transformer — transcodes short low-res preview clips of videos
+    // so the dashboard can play them (full files are far too large for the
+    // capped Firebase module payloads).
+    implementation("androidx.media3:media3-transformer:1.4.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
 
     // Gson
     implementation("com.google.code.gson:gson:2.10.1")

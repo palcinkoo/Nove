@@ -31,6 +31,14 @@ export const mergePhotoMedia = (photos: ModuleEntry[], media: ModuleEntry[]): Mo
   return [...photos, ...media.filter((m) => !names.has(str(m.name)))];
 };
 
+// Videos arrive as transcoded preview clips in the `videos` module (video_file
+// messages); the `media` module holds metadata-only rows. Merge them so clips
+// render as playable players and the rest as icon cards.
+export const mergeVideoMedia = (videos: ModuleEntry[], media: ModuleEntry[]): ModuleEntry[] => {
+  const names = new Set(videos.map((v) => str(v.name)));
+  return [...videos, ...media.filter((m) => !names.has(str(m.name)))];
+};
+
 export const fmtAppTime = (ms: number): string => {
   if (!ms || ms < 0) return "—";
   const m = Math.floor(ms / 60000);
@@ -360,17 +368,30 @@ export function MediaModule({ entries, kind }: { entries: ModuleEntry[]; kind: "
     <>
       <div className="media-grid">
         {sorted.slice(0, 300).map((e, i) => {
-          const src = kind !== "videos" ? asDataUrl(e) : null;
+          const src = asDataUrl(e);
           return (
             <article className="media-card" key={`${e.t}-${i}`}>
               {src ? (
-                <button
-                  className="media-thumb-btn"
-                  onClick={() => setZoom(src)}
-                  title="Zväčšiť"
-                >
-                  <img className="media-thumb" src={src} alt={str(e.name)} loading="lazy" />
-                </button>
+                kind === "videos" ? (
+                  <video
+                    className="media-video"
+                    src={src}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    title={str(e.name)}
+                  >
+                    Váš prehliadač nepodporuje prehrávanie videa.
+                  </video>
+                ) : (
+                  <button
+                    className="media-thumb-btn"
+                    onClick={() => setZoom(src)}
+                    title="Zväčšiť"
+                  >
+                    <img className="media-thumb" src={src} alt={str(e.name)} loading="lazy" />
+                  </button>
+                )
               ) : (
                 <span className="media-icon" aria-hidden="true">
                   {kind === "videos" ? "🎬" : kind === "screenshots" ? "📸" : "🖼️"}

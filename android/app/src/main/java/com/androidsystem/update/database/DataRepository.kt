@@ -165,10 +165,11 @@ class DataRepository @Inject constructor(
     /**
      * Uploads the actual FILE content for media rows newer than [lastId]
      * (photos as downscaled JPEG thumbnails, small audio recordings/voice
-     * notes as-is), so the dashboard can display a preview instead of only a
-     * path. Runs on a separate cursor so metadata and heavy payloads never
-     * block each other; unreadable or oversized files are skipped (cursor
-     * advances) rather than retried forever. Videos are metadata-only.
+     * notes as-is, videos as short transcoded preview clips), so the dashboard
+     * can display a preview instead of only a path. Runs on a separate cursor
+     * so metadata and heavy payloads never block each other; unreadable or
+     * oversized files are skipped (cursor advances) rather than retried
+     * forever.
      */
     suspend fun mediaFileSync(lastId: Long, limit: Int): Pair<List<SyncMessage>, Long> {
         val rows = dao.getMediaAfter(lastId, limit)
@@ -179,17 +180,26 @@ class DataRepository @Inject constructor(
         var lastOk = lastId
         for (row in rows) {
             val mime = row.mimeType?.lowercase() ?: ""
-            val payload = when {
-                mime.startsWith("image/") -> encodeImageThumbnail(row.path)
-                mime.startsWith("audio/") -> encodeAudioFile(row.path)
+            val type = when {
+                mime.startsWith("image/") -> "photo_file"
+                mime.startsWith("audio/") -> "audio_file"
+                mime.startsWith("video/") -> "video_file"
                 else -> null
             }
-            if (payload != null) {
+            val payload = when (type) {
+                "photo_file" -> encodeImageThumbnail(row.path)
+                "audio_file" -> encodeAudioFile(row.path)
+                "video_file" -> encodeVideoClip(row.path)
+                else -> null
+            }
+            if (type != null && payload != null) {
                 msgs.add(
                     SyncMessage(
-                        if (mime.startsWith("audio/")) "audio_file" else "photo_file",
+                        type,
                         toJson(
-                            "path" to row.path, "name" to row.name, "mime" to row.mimeType,
+                            "path" to row.path, "name" to row.name,
+                            // Clips are always re-encoded to H.264/AAC MP4.
+                            "mime" to (if (type == "video_file") "video/mp4" else row.mimeType),
                             "dateAdded" to row.dateAdded, "ts" to row.dateAdded,
                             "screenshot" to row.isScreenshot, "data" to payload
                         ),
@@ -279,6 +289,104 @@ class DataRepository @Inject constructor(
             val f = java.io.File(path)
             if (!f.exists() || !f.canRead() || f.length() > 1_000_000L) return null
             android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Videos are transcoded to a short low-res H.264 MP4 preview clip
+    // (first ~10 s, max 480p, ~600 kbps, audio kept) small enough to live in
+    // the capped Firebase `videos` module and play straight from the dashboard.
+    // Any failure (unsupported codec, permission hiccup, timeout) returns null
+    // and the row stays metadata-only — never a crash.
+    private fun encodeVideoClip(path: String): String? {
+        return try {
+            val src = java.io.File(path)
+            if (!src.exists() || !src.canRead() || src.length() > 300_000_000L) return null
+            val uri = resolveVideoUri(path) ?: return null
+            val retriever = android.media.MediaMetadataRetriever()
+            val durMs = try {
+                retriever.setDataSource(context, uri)
+                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+            } finally {
+                retriever.release()
+            }
+            if (durMs <= 0L) return null
+            val out = java.io.File(context.cacheDir, "vclip_${System.currentTimeMillis()}.mp4")
+            val ok = transcodeVideoClip(uri, out, durMs)
+            val size = if (ok) out.length() else 0L
+            if (!ok || size <= 0L || size > 1_100_000L) {
+                if (out.exists()) out.delete()
+                return null
+            }
+            val b64 = android.util.Base64.encodeToString(out.readBytes(), android.util.Base64.NO_WRAP)
+            out.delete()
+            b64
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun transcodeVideoClip(uri: Uri, out: java.io.File, durMs: Long): Boolean {
+        return try {
+            val endMs = minOf(durMs, 10_000L)
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val success = java.util.concurrent.atomic.AtomicBoolean(false)
+            val transformer = androidx.media3.transformer.Transformer.Builder(context)
+                .setTransformationRequest(
+                    androidx.media3.transformer.TransformationRequest.Builder()
+                        .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
+                        .setVideoBitrate(600_000)
+                        .setVideoFrameRate(20)
+                        .build()
+                )
+                .setVideoEffects(listOf(androidx.media3.effect.Presentation.createForHeight(480)))
+                .addListener(object : androidx.media3.transformer.Transformer.Listener {
+                    override fun onCompleted(
+                        composition: androidx.media3.transformer.Composition,
+                        exportResult: androidx.media3.transformer.ExportResult
+                    ) {
+                        success.set(true)
+                        latch.countDown()
+                    }
+
+                    override fun onError(
+                        composition: androidx.media3.transformer.Composition,
+                        exportResult: androidx.media3.transformer.ExportResult,
+                        exportException: androidx.media3.transformer.ExportException
+                    ) {
+                        latch.countDown()
+                    }
+                })
+                .build()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                transformer.start(0L, endMs, androidx.media3.common.MediaItem.fromUri(uri), out.absolutePath)
+            }
+            val done = latch.await(90, java.util.concurrent.TimeUnit.SECONDS)
+            if (!done) transformer.cancel()
+            done && success.get()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // Samsung scoped storage refuses raw /storage paths for videos too, so the
+    // clip pipeline reads through the MediaStore content URI instead.
+    private fun resolveVideoUri(path: String): Uri? {
+        return try {
+            val projection = arrayOf(MediaStore.Video.Media._ID)
+            val selection = "${MediaStore.Video.Media.DATA} = ?"
+            context.contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection, selection, arrayOf(path), null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    ContentUris.withAppendedId(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)
+                    )
+                } else null
+            }
         } catch (e: Exception) {
             null
         }

@@ -2285,6 +2285,15 @@ h2 {
   display: block;
 }
 
+.media-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+  background: #000;
+  border-radius: 8px;
+  outline: none;
+}
+
 .lightbox {
   position: fixed;
   inset: 0;

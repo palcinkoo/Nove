@@ -24,6 +24,7 @@ import {
   KeywordsModule,
   AudioModule,
   mergePhotoMedia,
+  mergeVideoMedia,
 } from "./modules";
 
 /* ---------- icons ---------- */
@@ -396,9 +397,14 @@ function AppRoutes({
             token={token}
             onTokenExpired={onTokenExpired}
             title="Videos"
-            desc="Video files from the device media library"
-            collections={["media"]}
-            render={(m) => <MediaModule entries={m.media ?? []} kind="videos" />}
+            desc="Video files from the device — playable preview clips (first 10s, 480p)"
+            collections={["videos", "media"]}
+            render={(m) => (
+              <MediaModule
+                entries={mergeVideoMedia(m.videos ?? [], m.media ?? [])}
+                kind="videos"
+              />
+            )}
           />
         }
       />
