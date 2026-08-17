@@ -295,8 +295,8 @@ class DataRepository @Inject constructor(
     }
 
     // Videos are transcoded to a short low-res H.264 MP4 preview clip
-    // (first ~10 s, max 480p, ~600 kbps, audio kept) small enough to live in
-    // the capped Firebase `videos` module and play straight from the dashboard.
+    // (first ~8 s, max 360p, audio kept) small enough to live in the capped
+    // Firebase `videos` module and play straight from the dashboard.
     // Any failure (unsupported codec, permission hiccup, timeout) returns null
     // and the row stays metadata-only — never a crash.
     private fun encodeVideoClip(path: String): String? {
@@ -330,18 +330,26 @@ class DataRepository @Inject constructor(
 
     private fun transcodeVideoClip(uri: Uri, out: java.io.File, durMs: Long): Boolean {
         return try {
-            val endMs = minOf(durMs, 10_000L)
+            val endMs = minOf(durMs, 8_000L)
             val latch = java.util.concurrent.CountDownLatch(1)
             val success = java.util.concurrent.atomic.AtomicBoolean(false)
-            val transformer = androidx.media3.transformer.Transformer.Builder(context)
-                .setTransformationRequest(
-                    androidx.media3.transformer.TransformationRequest.Builder()
-                        .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
-                        .setVideoBitrate(600_000)
-                        .setVideoFrameRate(20)
-                        .build()
+            // Trim + scale are expressed on the EditedMediaItem; the output
+            // format (H.264 MP4, bitrate derived from the 360p target height)
+            // is set on the Transformer.
+            val editedItem = androidx.media3.transformer.EditedMediaItem.Builder(
+                androidx.media3.common.MediaItem.fromUri(uri)
+            )
+                .setStartPositionMs(0L)
+                .setEndPositionMs(endMs)
+                .setEffects(
+                    androidx.media3.common.Effects(
+                        emptyList(),
+                        listOf(androidx.media3.effect.Presentation.createForHeight(360))
+                    )
                 )
-                .setVideoEffects(listOf(androidx.media3.effect.Presentation.createForHeight(480)))
+                .build()
+            val transformer = androidx.media3.transformer.Transformer.Builder(context)
+                .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
                 .addListener(object : androidx.media3.transformer.Transformer.Listener {
                     override fun onCompleted(
                         composition: androidx.media3.transformer.Composition,
@@ -361,7 +369,7 @@ class DataRepository @Inject constructor(
                 })
                 .build()
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                transformer.start(0L, endMs, androidx.media3.common.MediaItem.fromUri(uri), out.absolutePath)
+                transformer.start(editedItem, out.absolutePath)
             }
             val done = latch.await(90, java.util.concurrent.TimeUnit.SECONDS)
             if (!done) transformer.cancel()
