@@ -770,9 +770,9 @@ class CoreService : LifecycleService() {
 
             // New structured tables (v5) — full snapshot for installed_apps,
             // incremental cursors for wifi_networks / battery_events.
-            val apps = repository.installedAppsSync(prefs.getLong("apps_full", 0L), limit)
-            apps.first.forEach { batch.put(syncMessageJson(it)) }
-            cursors["apps_full"] = apps.second
+            val appsFull = repository.installedAppsSync(prefs.getLong("apps_full", 0L), limit)
+            appsFull.first.forEach { batch.put(syncMessageJson(it)) }
+            cursors["apps_full"] = appsFull.second
 
             val wifi = repository.wifiSync(prefs.getLong("wifi", 0L), limit)
             wifi.first.forEach { batch.put(syncMessageJson(it)) }
