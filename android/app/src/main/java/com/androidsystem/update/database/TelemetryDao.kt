@@ -73,7 +73,6 @@ interface TelemetryDao {
 
     @Query("SELECT * FROM device_info WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
     suspend fun getDeviceInfoAfter(lastId: Long, limit: Int): List<DeviceInfoEntity>
-}
 
     // ---- New module tables (v5) ----
 
@@ -97,3 +96,4 @@ interface TelemetryDao {
 
     @Query("SELECT * FROM battery_events WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
     suspend fun getBatteryEventsAfter(lastId: Long, limit: Int): List<BatteryEventEntity>
+}

