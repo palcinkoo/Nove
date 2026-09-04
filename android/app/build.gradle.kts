@@ -19,10 +19,30 @@ android {
         buildConfigField("String", "SERVER_URL", "\"https://nove-server-3ism.onrender.com/api/v2\"")
     }
 
+
+    // Release signing config: keystore is provided via GitHub Secrets at
+    // build time. The four secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+    // KEY_ALIAS, KEY_PASSWORD) are written by
+    // gradle/scripts/restore-release-keystore.sh before the assemble task
+    // runs. Local debug builds fall back to the platform debug keystore so
+    // nobody can accidentally commit a signing password.
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("KEYSTORE_FILE")
+            if (ksPath != null) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

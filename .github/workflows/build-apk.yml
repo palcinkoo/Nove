@@ -31,14 +31,24 @@ jobs:
         with:
           gradle-version: "8.4"
 
-      - name: Build debug APK
+      - name: Restore release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: bash gradle/scripts/restore-release-keystore.sh
+
+      - name: Build release APK
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/android/app/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd android
-          gradle assembleDebug --no-daemon
+          gradle assembleRelease --no-daemon
 
-      - name: Upload debug APK
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: system-utility-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: system-utility-release
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
