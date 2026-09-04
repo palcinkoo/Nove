@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { fmtDateTime, fmtRelative } from "./format";
-import { apiFetch } from "./api";
 
 export type ActivityItem = {
   deviceId: string;
@@ -56,7 +55,7 @@ async function fetchActivity(
   signal?: AbortSignal,
   onUnauthorized?: () => void
 ): Promise<ActivityItem[]> {
-  const res = await apiFetch("v2/activity", {
+  const res = await fetch("/api/activity", {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     signal,
   });

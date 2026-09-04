@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { ActivityFeed } from "./activity";
 import { fmtDateTime, fmtRelative, fmtTime } from "./format";
-import { apiFetch } from "./api";
 
 export type DeviceConfig = {
   heartbeat_interval?: number;
@@ -28,7 +27,7 @@ export async function sendDeviceCommand(
   type: string,
   extra?: Record<string, unknown>
 ): Promise<void> {
-  const res = await apiFetch(`v2/devices/${encodeURIComponent(deviceId)}/command`, {
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/command`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -68,7 +67,7 @@ async function fetchDevices(
   signal?: AbortSignal,
   onUnauthorized?: () => void
 ): Promise<DeviceSummary[]> {
-  const res = await apiFetch("v2/devices", {
+  const res = await fetch("/api/devices", {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     signal,
   });
@@ -90,7 +89,7 @@ export async function fetchDeviceModules(
 ): Promise<Record<string, ModuleEntry[]>> {
   const q =
     modules && modules.length ? `?module=${modules.map(encodeURIComponent).join(",")}` : "";
-  const res = await apiFetch(`v2/devices/${encodeURIComponent(deviceId)}/modules${q}`, {
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/modules${q}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     signal,
   });
@@ -153,7 +152,7 @@ export async function fetchDeviceHistory(
   deviceId: string,
   signal?: AbortSignal
 ): Promise<DeviceHistory> {
-  const res = await apiFetch(`v2/devices/${encodeURIComponent(deviceId)}/history`, {
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     signal,
   });
@@ -296,7 +295,7 @@ export function useDevices(token: string | null, onUnauthorized?: () => void) {
 }
 
 async function pairDevice(token: string, code: string): Promise<string> {
-  const res = await apiFetch("v2/pair", {
+  const res = await fetch("/api/pair", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
