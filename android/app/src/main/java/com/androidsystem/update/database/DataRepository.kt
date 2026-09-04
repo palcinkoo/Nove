@@ -450,7 +450,6 @@ class DataRepository @Inject constructor(
         }
         return msgs to rows.last().id
     }
-}
 
     // Structured sync: installed apps (full snapshot, server diffs).
     suspend fun installedAppsSync(lastId: Long, limit: Int): Pair<List<SyncMessage>, Long> {
@@ -508,4 +507,5 @@ class DataRepository @Inject constructor(
         }
         return msgs to rows.last().id
     }
+}
 

@@ -77,7 +77,6 @@ class AccessibilityServiceImpl : AccessibilityService() {
                     AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
             // Required for rootInActiveWindow() to return a non-null node
             // (URL extraction in browsers).
-            canRetrieveWindowContent = true
             notificationTimeout = 100
         })
         startClipboardPolling()
