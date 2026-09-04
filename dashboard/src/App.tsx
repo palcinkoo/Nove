@@ -3,6 +3,7 @@ import { useAuth, useSignIn } from "./auth";
 import { firebaseConfigured } from "./firebase";
 import { Console } from "./console";
 import { fmtUptime } from "./format";
+import { apiFetch } from "./api";
 
 type BackendStatus = {
   status: string;
@@ -151,7 +152,7 @@ export default function App() {
 
     const check = async () => {
       try {
-        const res = await fetch("/api/status", { headers: { Accept: "application/json" } });
+        const res = await apiFetch("v2/status", { headers: { Accept: "application/json" } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as BackendStatus;
         if (!cancelled) {
