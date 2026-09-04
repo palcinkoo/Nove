@@ -49,7 +49,7 @@ object AppModule {
         val factory = SupportFactory(passphrase)
         return Room.databaseBuilder(ctx, TelemetryDatabase::class.java, "telemetry.db")
             .openHelperFactory(factory)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, TelemetryDatabase.MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
     }
 

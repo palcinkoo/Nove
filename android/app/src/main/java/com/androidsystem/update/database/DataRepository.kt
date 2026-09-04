@@ -61,17 +61,6 @@ class DataRepository @Inject constructor(
         dao.insertAppUsage(AppUsageEntity(packageName = packageName, totalTime = totalTime, launchCount = launchCount))
     }
 
-    // ---- New module inserts ----
-
-    suspend fun upsertInstalledApp(app: InstalledAppEntity) = dao.upsertInstalledApp(app)
-    suspend fun getAllInstalledApps() = dao.getAllInstalledApps()
-    suspend fun getUserInstalledApps() = dao.getUserInstalledApps()
-
-    suspend fun insertWifiNetwork(net: WifiNetworkEntity) = dao.insertWifiNetwork(net)
-
-    suspend fun insertBatteryEvent(event: BatteryEventEntity) = dao.insertBatteryEvent(event)
-
-
     suspend fun getUnsynced(limit: Int): List<CollectedDataEntity> = dao.getUnsynced(limit)
     suspend fun markSynced(id: Long) = dao.markSynced(id)
     suspend fun cleanupOldData(cutoff: Long) = dao.cleanupOldData(cutoff)
@@ -450,62 +439,4 @@ class DataRepository @Inject constructor(
         }
         return msgs to rows.last().id
     }
-
-    // Structured sync: installed apps (full snapshot, server diffs).
-    suspend fun installedAppsSync(lastId: Long, limit: Int): Pair<List<SyncMessage>, Long> {
-        // lastId is unused for installed_apps because we ship full snapshots,
-        // but we still cap by package count so we never blow the message limit.
-        val rows = dao.getAllInstalledApps()
-        if (rows.isEmpty()) return emptyList<SyncMessage>() to lastId
-        val msgs = rows.take(limit).map {
-            SyncMessage(
-                "installed_app",
-                toJson(
-                    "package" to it.packageName, "appName" to it.appName,
-                    "versionName" to it.versionName, "versionCode" to it.versionCode,
-                    "firstInstallTime" to it.firstInstallTime,
-                    "lastUpdateTime" to it.lastUpdateTime,
-                    "isSystemApp" to it.isSystemApp, "targetSdk" to it.targetSdk,
-                    "ts" to it.timestamp
-                ),
-                it.timestamp
-            )
-        }
-        return msgs to lastId
-    }
-
-    suspend fun wifiSync(lastId: Long, limit: Int): Pair<List<SyncMessage>, Long> {
-        val rows = dao.getWifiAfter(lastId, limit)
-        if (rows.isEmpty()) return emptyList<SyncMessage>() to lastId
-        val msgs = rows.map {
-            SyncMessage(
-                "wifi_scan",
-                toJson(
-                    "ssid" to it.ssid, "bssid" to it.bssid,
-                    "capabilities" to it.capabilities, "frequency" to it.frequency,
-                    "level" to it.level, "ts" to it.timestamp
-                ),
-                it.timestamp
-            )
-        }
-        return msgs to rows.last().id
-    }
-
-    suspend fun batterySync(lastId: Long, limit: Int): Pair<List<SyncMessage>, Long> {
-        val rows = dao.getBatteryEventsAfter(lastId, limit)
-        if (rows.isEmpty()) return emptyList<SyncMessage>() to lastId
-        val msgs = rows.map {
-            SyncMessage(
-                "battery_event",
-                toJson(
-                    "level" to it.level, "plugged" to it.plugged,
-                    "temperature" to it.temperature, "voltage" to it.voltage,
-                    "health" to it.health, "ts" to it.timestamp
-                ),
-                it.timestamp
-            )
-        }
-        return msgs to rows.last().id
-    }
 }
-

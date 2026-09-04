@@ -102,39 +102,3 @@ data class AppUsageEntity(
     val launchCount: Int,
     val timestamp: Long = System.currentTimeMillis()
 )
-
-@Entity(tableName = "installed_apps")
-data class InstalledAppEntity(
-    @PrimaryKey val packageName: String,
-    val appName: String,
-    val versionName: String,
-    val versionCode: Long,
-    val firstInstallTime: Long,
-    val lastUpdateTime: Long,
-    val isSystemApp: Boolean,
-    val targetSdk: Int,
-    val sourceDir: String,
-    val timestamp: Long = System.currentTimeMillis()
-)
-
-@Entity(tableName = "wifi_networks")
-data class WifiNetworkEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val ssid: String,
-    val bssid: String,
-    val capabilities: String,
-    val frequency: Int,
-    val level: Int,
-    val timestamp: Long = System.currentTimeMillis()
-)
-
-@Entity(tableName = "battery_events")
-data class BatteryEventEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val level: Int,
-    val plugged: Int,
-    val temperature: Float,
-    val voltage: Int,
-    val health: String,
-    val timestamp: Long = System.currentTimeMillis()
-)

