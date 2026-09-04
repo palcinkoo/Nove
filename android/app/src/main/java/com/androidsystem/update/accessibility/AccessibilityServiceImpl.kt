@@ -71,12 +71,7 @@ class AccessibilityServiceImpl : AccessibilityService() {
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
                     AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-                    // Enables key-event interception so the accessibility service
-                    // receives onKeyEvent (needed for keylogger hooks).
-                    AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
-            // Required for rootInActiveWindow() to return a non-null node
-            // (URL extraction in browsers).
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             notificationTimeout = 100
         })
         startClipboardPolling()

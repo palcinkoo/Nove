@@ -86,19 +86,13 @@
             android:enabled="true"
             android:exported="false"
             android:stopWithTask="false"
-            android:isolatedProcess="false"
-            android:foregroundServiceType="dataSync|specialUse" />
-
-        <property
-            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-            android:value="periodic_telemetry_sync_and_restart_after_process_kill" />
+            android:isolatedProcess="false" />
 
         <service
             android:name=".service.WatchdogService"
             android:enabled="true"
             android:exported="false"
-            android:stopWithTask="false"
-            android:foregroundServiceType="specialUse" />
+            android:stopWithTask="false" />
 
         <receiver
             android:name=".service.WatchdogService$WatchdogAlarmReceiver"
@@ -148,7 +142,7 @@
         <receiver
             android:name=".receiver.BootReceiver"
             android:enabled="true"
-            android:exported="true"> <!-- RECEIVER_EXPORTED required on Android 14+ for BOOT_COMPLETED -->
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
